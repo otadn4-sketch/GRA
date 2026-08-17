@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#008080">
+  <title>سامانه خبرنامه گرایه</title>
+  <link rel="stylesheet" href="/admin/assets/app.css?v=11.33.0">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">گ</div>
+        <div><strong>گرایه</strong><small>سامانه هوشمند خبرنامه</small></div>
+      </div>
+      <button type="button" class="quick-start-nav" data-page="quick-start"><span>⚡</span><b>شروع سریع</b></button>
+      <nav class="main-nav" aria-label="بخش‌های سامانه">
+        <details class="nav-disclosure nav-menu-group" id="watchNav" aria-label="دیدبان">
+          <summary><span>◉</span><b>دیدبان</b><i aria-hidden="true">‹</i></summary>
+          <div class="nav-submenu">
+            <span class="nav-submenu-title">دیدبان</span>
+            <button class="nav-item nav-sub-item" data-page="monitoring"><span>◫</span> نظارت</button>
+            <button class="nav-item nav-sub-item" data-page="garaye"><span>✦</span> گرایه</button>
+          </div>
+        </details>
+        <details class="nav-disclosure nav-menu-group" id="settingsNav" aria-label="تنظیمات">
+          <summary><span>⚙</span><b>تنظیمات</b><i aria-hidden="true">‹</i></summary>
+          <div class="nav-submenu">
+            <span class="nav-submenu-title">تنظیمات</span>
+            <button class="nav-item nav-sub-item" data-page="automation"><span>↻</span> خودکارسازی</button>
+            <button class="nav-item nav-sub-item" data-page="sources"><span>⌁</span> منابع پایش</button>
+            <button class="nav-item nav-sub-item" data-page="portal"><span>♟</span> پرتال کاربری</button>
+            <button class="nav-item nav-sub-item" data-page="users" data-permission="users.manage"><span>♟</span> کاربران و دسترسی</button>
+            <button class="nav-item nav-sub-item" data-page="system"><span>⚙</span> وضعیت سامانه</button>
+          </div>
+        </details>
+        <details class="nav-disclosure nav-menu-group" id="newsmakerNav" aria-label="خبرساز">
+          <summary><span>✦</span><b>خبرساز</b><i aria-hidden="true">‹</i></summary>
+          <div class="nav-submenu">
+            <span class="nav-submenu-title">خبرساز</span>
+            <button class="nav-item nav-sub-item" data-page="stream"><span>◫</span> جریان</button>
+            <details class="nav-sub-disclosure" aria-label="نهایی‌سازی خبر">
+              <summary><span>✎</span><b>نهایی‌سازی خبر</b><i aria-hidden="true">‹</i></summary>
+              <div class="nav-sub-submenu">
+                <button class="nav-item nav-sub-item nav-sub-sub-item" data-page="finalization" data-section="workbench"><span>✎</span> میز تدوین</button>
+                <button class="nav-item nav-sub-item nav-sub-sub-item" data-page="finalization" data-section="drafts"><span>▤</span> پیش‌نویس‌ها</button>
+              </div>
+            </details>
+            <button class="nav-item nav-sub-item" data-page="high-attention"><span>◉</span> پربازتاب</button>
+            <button class="nav-item nav-sub-item" data-page="bulletins"><span>▤</span> خبرنامه</button>
+            <button class="nav-item nav-sub-item" data-page="people"><span>♙</span> شناسنامه اشخاص</button>
+          </div>
+        </details>
+      </nav>
+      <div class="sidebar-foot">
+          <span class="live-dot"></span>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۳.۰</span></small></div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="mobileMenu" aria-label="بازکردن منو">☰</button>
+        <div>
+          <h1 id="pageTitle">تقویم و مناسبت‌ها</h1>
+          <p id="pageSubtitle">تقویم رسمی هجری شمسی و مناسبت‌های روز</p>
+        </div>
+        <div class="top-actions">
+          <button class="current-user" id="currentUser" type="button" title="پرتال کاربری"></button>
+          <button class="icon-button" id="refreshPage" title="تازه‌سازی">↻</button>
+          <button class="icon-button" id="logoutButton" title="خروج">⇥</button>
+        </div>
+      </header>
+
+      <div class="page-wrap">
+        <section class="page active" id="page-overview">
+          <article class="panel calendar-hero">
+            <div class="panel-heading calendar-heading">
+              <div><span class="eyebrow">صفحهٔ آغازین</span><h3>تقویم رسمی ایران</h3><p>روزها، تعطیلات رسمی و مناسبت‌های ماه انتخاب‌شده.</p></div>
+              <span class="calendar-today-label" id="calendarTodayLabel">در حال دریافت تاریخ…</span>
+            </div>
+            <div class="jalali-calendar" aria-live="polite">
+              <div class="calendar-controls">
+                <button type="button" class="icon-button" id="calendarNext" aria-label="ماه بعد">›</button>
+                <h4 id="calendarMonthLabel">—</h4>
+                <button type="button" class="icon-button" id="calendarPrevious" aria-label="ماه قبل">‹</button>
+              </div>
+              <div class="calendar-weekdays" aria-hidden="true"><span>شنبه</span><span>یکشنبه</span><span>دوشنبه</span><span>سه‌شنبه</span><span>چهارشنبه</span><span>پنجشنبه</span><span>جمعه</span></div>
+              <div class="calendar-days" id="calendarDays"><div class="calendar-loading">در حال آماده‌سازی تقویم…</div></div>
+            </div>
+          </article>
+          <article class="panel calendar-events-panel">
+            <div class="panel-heading"><div><span class="eyebrow">مناسبت‌ها</span><h3 id="calendarEventsTitle">مناسبت‌های روز انتخاب‌شده</h3><p id="calendarEventsSubtitle">برای مشاهدهٔ مناسبت‌های هر روز، آن روز را انتخاب کنید.</p></div></div>
+            <div id="calendarEvents" class="calendar-events"><div class="empty-mini">تقویم در حال بارگذاری است.</div></div>
+          </article>
+        </section>
+
+        <section class="page" id="page-stream">
+          <div class="filter-panel">
+            <label class="search-field"><span>⌕</span><input id="streamQuery" placeholder="جست‌وجو در متن، شخص یا موضوع"></label>
+            <select id="streamStatus"><option value="">همه پیام‌ها</option><option value="pending">دریافت‌شده</option><option value="analyzed">تحلیل‌شده</option></select>
+            <select id="streamSource"><option value="">همه منابع</option></select>
+            <input id="streamFrom" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="از تاریخ؛ ۱۴۰۵/۰۵/۰۱" title="تاریخ جلالی از" autocomplete="off" data-jalali-date>
+            <input id="streamTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="تا تاریخ؛ ۱۴۰۵/۰۵/۳۱" title="تاریخ جلالی تا" autocomplete="off" data-jalali-date>
+            <button class="primary-button" id="applyStreamFilters">اعمال فیلتر</button>
+            <button class="outline-button analyze-button" id="analyzeSelected">✦ تحلیل کن</button>
+          </div>
+          <div class="selection-bar">
+            <div><b id="streamCount">۰ پیام</b><span id="streamSelectionHint">پیام‌های موردنظر را برای تحلیل با مدل اول انتخاب کنید.</span></div>
+            <div class="selection-actions" aria-label="کنترل انتخاب پیام‌ها"><button type="button" class="outline-button" id="selectVisibleMessages">انتخاب همه</button><button type="button" class="ghost-button" id="clearMessageSelection">لغو انتخاب</button></div>
+          </div>
+          <div id="messageGrid" class="message-grid"></div>
+          <div class="stream-more-bar hidden" id="streamMoreBar"><span id="streamMoreHint"></span><button type="button" class="outline-button" id="loadMoreStream">بارگذاری ادامهٔ اخبار همین روز</button></div>
+        </section>
+
+        <section class="page" id="page-quick-start">
+          <article class="panel quick-start-hero">
+            <div class="panel-heading">
+              <div><span class="eyebrow">خبرساز مرحله‌ای</span><h3>شروع سریع</h3><p>همهٔ مراحل خبرساز روی یک صفحه است و با جریان، نهایی‌سازی، پربازتاب و خبرنامه هم‌گام می‌ماند.</p></div>
+              <button type="button" class="text-button" id="resetQuickStart">شروع از ابتدا</button>
+            </div>
+            <ol class="quick-start-stepper" id="quickStartStepper" aria-label="مراحل شروع سریع">
+              <li><button type="button" class="qs-step-tab active" data-qs-step="1"><b>۱</b><span>انتخاب زمان تحلیل</span></button></li>
+              <li><button type="button" class="qs-step-tab" data-qs-step="2"><b>۲</b><span>تحلیل اخبار</span></button></li>
+              <li><button type="button" class="qs-step-tab" data-qs-step="3"><b>۳</b><span>نهایی‌سازی خبر</span></button></li>
+              <li><button type="button" class="qs-step-tab" data-qs-step="4"><b>۴</b><span>پربازتاب</span></button></li>
+              <li><button type="button" class="qs-step-tab" data-qs-step="5"><b>۵</b><span>خروجی‌سازی</span></button></li>
+            </ol>
+          </article>
+
+          <section class="qs-panel" id="qsStep1">
+            <article class="panel">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۱ از ۵</span><h3>انتخاب زمان تحلیل</h3><p>روزی را که اخبار آن باید تحلیل شود انتخاب کنید. همین بازه در جریان اخبار و میز تدوین هم اعمال می‌شود.</p></div></div>
+              <div class="form-grid two">
+                <label>روز تحلیل (جلالی)<input id="qsDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date></label>
+                <label>ساعت از<input id="qsTimeFrom" type="time" dir="ltr" step="60" value="00:00"></label>
+                <label>تا روز (اختیاری)<input id="qsDateTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="همان روز" autocomplete="off" data-jalali-date></label>
+                <label>ساعت تا<input id="qsTimeTo" type="time" dir="ltr" step="60" value="23:59"></label>
+              </div>
+              <p class="qs-sync-note" id="qsWindowHint">با تأیید این مرحله، فیلتر تاریخ بخش‌های دیگر سامانه با همین بازه هم‌گام می‌شود.</p>
+              <div class="button-row"><button type="button" class="primary-button" id="qsConfirmWindow">تأیید روز و رفتن به تحلیل</button></div>
+            </article>
+          </section>
+
+          <section class="qs-panel hidden" id="qsStep2">
+            <article class="panel">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۲ از ۵</span><h3>تحلیل اخبار</h3><p>اخبار همین بازه از دیتابیس خوانده می‌شود و تحلیل مدل اول به‌صورت دسته‌ای با نوار پیشرفت اجرا می‌گردد.</p></div></div>
+              <div id="qsAnalysisProgress" class="qs-progress" aria-live="polite"></div>
+              <div class="button-row">
+                <button type="button" class="ghost-button" id="qsBackToWindow">بازگشت</button>
+                <button type="button" class="primary-button" id="qsRunAnalysis">شروع تحلیل اخبار باقی‌مانده</button>
+                <button type="button" class="outline-button" id="qsSkipToFinalization">رفتن به نهایی‌سازی</button>
+              </div>
+              <div id="qsStreamPreview" class="qs-preview-list"></div>
+            </article>
+          </section>
+
+          <section class="qs-panel hidden" id="qsStep3">
+            <article class="panel">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۳ از ۵</span><h3>نهایی‌سازی خبر</h3><p>گوینده یا رویداد همین بازه را انتخاب کنید، پیش‌نویس بسازید و خبر را نهایی کنید. نتیجه در میز تدوین هم دیده می‌شود.</p></div></div>
+              <aside id="qsFinalizationProgress" class="finalization-progress hidden" aria-live="polite"></aside>
+              <div class="analysis-filter-grid">
+                <label>گوینده<select id="qsSpeaker"><option value="">ابتدا بازه را تأیید کنید</option></select></label>
+                <label>رویداد مستقل<select id="qsEvent"><option value="">ابتدا بازه را تأیید کنید</option></select></label>
+                <label>موضوع کلی<select id="qsGeneralTopic"><option value="">همه موضوعات کلی</option></select></label>
+                <label>موضوع مشخص<select id="qsSpecificTopic"><option value="">همه موضوعات مشخص</option></select></label>
+              </div>
+              <div class="analysis-selection-bar">
+                <div><b id="qsAnalyzedCount">۰ خبر</b><span>خبرهای تحلیل‌شدهٔ همین بازه</span></div>
+                <button type="button" class="primary-button" id="qsCreateDraft" disabled>ساخت پیش‌نویس از خبرهای انتخاب‌شده</button>
+              </div>
+              <div id="qsAnalyzedList" class="analyzed-message-list"><div class="empty-mini">یک گوینده یا رویداد را انتخاب کنید.</div></div>
+              <div class="qs-draft-box">
+                <div class="block-head"><div><h4>پیش‌نویس‌های همین بازه</h4><p>پس از ساخت پیش‌نویس می‌توانید آن را همین‌جا نهایی کنید یا در میز تدوین کامل ویرایش کنید.</p></div></div>
+                <div id="qsDraftList" class="draft-list"><div class="empty-mini">هنوز پیش‌نویسی برای این بازه نیست.</div></div>
+              </div>
+              <div class="button-row">
+                <button type="button" class="ghost-button" id="qsBackToAnalysis">بازگشت</button>
+                <button type="button" class="outline-button" id="qsOpenFullDesk">باز کردن میز تدوین کامل</button>
+                <button type="button" class="primary-button" id="qsGoHighAttention">رفتن به پربازتاب</button>
+              </div>
+            </article>
+          </section>
+
+          <section class="qs-panel hidden" id="qsStep4">
+            <article class="panel">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۴ از ۵</span><h3>پربازتاب</h3><p>خبرهای نهایی همین روز را انتخاب و محورهای پربازتاب را تولید کنید. نتیجه با بخش پربازتاب سامانه یکی است.</p></div></div>
+              <div class="bulletin-drafts-toolbar" id="qsHighAttentionToolbar">
+                <label class="select-all-label"><input id="qsSelectAllHighAttention" type="checkbox"> انتخاب همه خبرهای این روز</label>
+                <span id="qsHighAttentionHint">خبرهای نهایی همین روز</span>
+              </div>
+              <div id="qsHighAttentionDrafts" class="sortable-list"><div class="empty-mini">ابتدا روز را تأیید و خبر را نهایی کنید.</div></div>
+              <button type="button" class="primary-button" id="qsGenerateHighAttention" disabled>تولید پربازتاب</button>
+              <div id="qsHighAttentionEditor" class="high-attention-editor hidden">
+                <div id="qsHighAttentionItems" class="high-attention-items"></div>
+                <div class="sticky-actions">
+                  <button type="button" class="outline-button" id="qsSaveHighAttention">ذخیره ویرایش‌ها</button>
+                  <button type="button" class="primary-button" id="qsFinalizeHighAttention">نهایی‌سازی پربازتاب</button>
+                </div>
+              </div>
+              <div class="button-row">
+                <button type="button" class="ghost-button" id="qsBackToFinalization">بازگشت</button>
+                <button type="button" class="primary-button" id="qsGoOutput">رفتن به خروجی‌سازی</button>
+              </div>
+            </article>
+          </section>
+
+          <section class="qs-panel hidden" id="qsStep5">
+            <article class="panel">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۵ از ۵</span><h3>خروجی‌سازی خبرنامه</h3><p>خبرهای نهایی و پربازتاب همین روز را برای ساخت خروجی HTML، Word و PDF انتخاب کنید.</p></div></div>
+              <div class="form-grid two bulletin-meta-fields">
+                <label>عنوان خبرنامه<input id="qsBulletinTitle" value="خبرنامه گرایه"></label>
+                <label>نوع گزارش<select id="qsBulletinMode"><option value="concise">کوتاه</option><option value="full">کامل</option></select></label>
+                <label class="full">مقدمه<textarea id="qsBulletinIntroduction" rows="4" maxlength="8000" placeholder="در صورت خالی‌بودن، صفحهٔ مقدمه ساخته نمی‌شود."></textarea></label>
+              </div>
+              <div id="qsBulletinDrafts" class="sortable-list bulletin-drafts-scroll"><div class="empty-mini">خبر نهایی این روز را انتخاب کنید.</div></div>
+              <div id="qsBulletinHighAttention" class="sortable-list"><div class="empty-mini">پربازتاب نهایی این روز اینجا می‌آید.</div></div>
+              <button type="button" class="primary-button wide" id="qsCreateBulletin">ساخت و آماده‌سازی خروجی</button>
+              <div id="qsBulletinRuns" class="table-wrap"></div>
+              <div class="button-row"><button type="button" class="ghost-button" id="qsBackToHighAttention">بازگشت</button><button type="button" class="outline-button" id="qsOpenBulletins">باز کردن بخش خبرنامه</button></div>
+            </article>
+          </section>
+        </section>
+
+        <section class="page" id="page-portal">
+          <article class="panel">
+            <div class="panel-heading"><div><span class="eyebrow">حساب کاربری</span><h3>پرتال کاربری</h3><p>نمایه، نقش، آمار ارسال و تنظیمات شخصی همین حساب</p></div></div>
+            <div id="userPortalProfile" class="person-profile-content"><div class="empty-mini">در حال دریافت پروفایل…</div></div>
+            <form id="portalProfileForm" class="inline-form always-visible">
+              <div class="form-grid three">
+                <label>نام نمایشی<input id="portalFullName" required></label>
+                <label>رمز عبور جدید<input id="portalPassword" type="password" minlength="10" autocomplete="new-password" placeholder="برای حفظ رمز فعلی خالی بگذارید"></label>
+                <label>تصویر پروفایل<input id="portalPortrait" type="file" accept="image/png,image/jpeg,image/webp"></label>
+              </div>
+              <div class="button-row"><button type="submit" class="primary-button">ذخیره تغییرات پرتال</button></div>
+            </form>
+          </article>
+        </section>
+
+        <section class="page" id="page-automation">
+          <article class="panel automation-overview">
+            <div class="panel-heading"><div><span class="eyebrow">خودکارسازی تحریریه</span><h3>کنترل مستقل تحلیل، پیش‌نویس و کرول بله</h3><p>هر فرایند از زمان انتخابی شما به بعد عمل می‌کند و بدون وابستگی به فرایند دیگر قابل شروع یا توقف است.</p></div><span id="automationStatusBadge" class="status-pill pending">در حال دریافت وضعیت</span></div>
+            <div id="automationStatusDetails" class="automation-status-details"></div>
+          </article>
+
+          <div class="automation-stage-grid">
+            <article class="panel automation-panel" id="automationAnalysis">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ اول · هر ۱۰ دقیقه</span><h3>تحلیل خودکار پیام‌ها</h3><p>تشخیص گوینده، محل بیان، رویداد و تگ‌ها؛ موارد نامطمئن به کنترل انسانی می‌روند.</p></div><span id="analysisAutomationBadge" class="status-pill pending">متوقف</span></div>
+              <div class="form-grid two automation-start-fields">
+                <label>شروع از روز (جلالی)<input id="analysisAutomationStartDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۷" autocomplete="off" data-jalali-date></label>
+                <label>ساعت شروع<input id="analysisAutomationStartTime" type="time" dir="ltr" step="60"></label>
+              </div>
+              <div class="automation-actions"><button type="button" class="primary-button" id="startEditorialAutomation">شروع تحلیل خودکار</button><button type="button" class="ghost-button" id="stopEditorialAutomation">توقف تحلیل</button><button type="button" class="outline-button" id="runEditorialAnalysisNow">اجرای فوری همان بازه</button></div>
+            </article>
+            <article class="panel automation-panel" id="automationDrafts">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ دوم · هر ۳ ساعت</span><h3>تولید خودکار پیش‌نویس</h3><p>فقط خبرهای تحلیل‌شده و شناسنامه‌ای را به پیش‌نویس با خلاصه‌ها و جزئیات تبدیل می‌کند.</p></div><span id="draftAutomationBadge" class="status-pill pending">متوقف</span></div>
+              <div class="form-grid two automation-start-fields">
+                <label>شروع از روز (جلالی)<input id="draftAutomationStartDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۷" autocomplete="off" data-jalali-date></label>
+                <label>ساعت شروع<input id="draftAutomationStartTime" type="time" dir="ltr" step="60"></label>
+              </div>
+              <div class="automation-actions"><button type="button" class="primary-button" id="startEditorialDraftAutomation">شروع تولید پیش‌نویس</button><button type="button" class="ghost-button" id="stopEditorialDraftAutomation">توقف تولید پیش‌نویس</button><button type="button" class="outline-button" id="runEditorialDraftsNow">اجرای فوری همان بازه</button></div>
+            </article>
+          </div>
+
+          <article class="panel human-control-panel" id="automationHumanControl">
+            <div class="panel-heading"><div><span class="eyebrow">کنترل انسانی</span><h3>بررسی پیام و نامزد گوینده</h3><p>ابتدا متن پیام، سپس نامزد و شواهد یافت‌شده نشان داده می‌شود. می‌توانید آن را با شناسنامه تطبیق دهید، به شناسنامه بیفزایید یا رد کنید.</p></div><button type="button" class="icon-button" id="refreshHumanControl" title="تازه‌سازی">↻</button></div>
+            <div id="humanControlList" class="human-control-list"><div class="empty-mini">در حال دریافت موارد کنترل انسانی…</div></div>
+          </article>
+
+          <article class="panel crawler-automation-panel" id="automationCrawler">
+            <div class="panel-heading"><div><span class="eyebrow">Selenium · بله</span><h3>کرولر کانال‌های عمومی</h3><p>فهرست کانال، روشن/خاموش‌بودن و اجرای سرویس کرولر را از همینجا مدیریت کنید.</p></div><span id="crawlerBadge" class="status-pill pending">در حال بررسی</span></div>
+            <form id="crawlerChannelsForm" class="inline-form always-visible">
+              <div class="crawler-runtime-control"><div><b>اجازهٔ کرول دوره‌ای</b><p>با توقف، کانال در حال پردازش کامل می‌شود و دور تازه‌ای آغاز نخواهد شد.</p></div><button type="button" id="crawlerEnabledToggle" class="switch off" aria-pressed="false">خاموش</button></div>
+              <label>فهرست کانال‌ها<textarea id="crawlerChannels" rows="8" dir="ltr" placeholder="channel_username"></textarea></label>
+              <div id="crawlerHelp" class="permission-box"></div>
+              <div class="button-row"><button type="submit" class="outline-button">ذخیره فهرست</button><button type="button" class="primary-button" id="startCrawler">اجرای کرولر</button><button type="button" class="ghost-button" id="stopCrawler">توقف امن کرولر</button></div>
+            </form>
+          </article>
+        </section>
+
+        <section class="page" id="page-finalization">
+          <section class="finalization-view finalization-range-view" id="finalizationRangeView" aria-labelledby="finalizationRangeTitle">
+          <article class="panel analysis-workbench">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">میز تدوین · مرحلهٔ ۱ از ۲</span>
+                <h3 id="finalizationRangeTitle">تعیین بازهٔ خبرهای تحلیل‌شده</h3>
+                <p>ابتدا بازه را تأیید کنید. در مرحلهٔ بعد، فقط گویندگان و رویدادهای همین بازه در میز تدوین نمایش داده می‌شوند.</p>
+              </div>
+            </div>
+            <div class="finalization-window">
+              <div class="block-head"><div><h4>بازهٔ خبرهای تحلیل‌شده</h4><p id="finalizationWindowHint">روز و ساعت آغاز و پایان را وارد کنید؛ انتخاب شما در مرحلهٔ میز تدوین حفظ می‌شود.</p></div><button type="button" class="primary-button" id="applyFinalizationWindow">تأیید بازه و ورود به میز تدوین</button></div>
+              <div class="analysis-filter-grid">
+                <label>از روز<input id="finalizationDateFrom" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۱" autocomplete="off" data-jalali-date></label>
+                <label>ساعت از<input id="finalizationTimeFrom" type="time" dir="ltr" step="60"></label>
+                <label>تا روز<input id="finalizationDateTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۷" autocomplete="off" data-jalali-date></label>
+                <label>ساعت تا<input id="finalizationTimeTo" type="time" dir="ltr" step="60"></label>
+              </div>
+            </div>
+          </article>
+          </section>
+          <section class="finalization-view finalization-desk-view hidden" id="finalizationDeskView" aria-labelledby="finalizationDeskTitle">
+          <article class="panel analysis-workbench">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">میز تدوین · مرحلهٔ ۲ از ۲</span>
+                <h3 id="finalizationDeskTitle">انتخاب خبر و ساخت پیش‌نویس</h3>
+                <p id="finalizationDeskHint">فهرست گویندگان، تگ‌ها و رویدادهای مستقل فقط بر اساس بازهٔ تأییدشده در مرحلهٔ قبل ساخته شده است.</p>
+              </div>
+              <div class="finalization-desk-actions"><button type="button" class="text-button" id="changeFinalizationRange">تغییر بازه</button><button type="button" class="icon-button" id="refreshAnalysisFilters" title="تازه‌سازی تگ‌ها">↻</button></div>
+            </div>
+            <aside id="finalizationProgress" class="finalization-progress hidden" aria-live="polite"></aside>
+            <div class="analysis-filter-grid">
+              <label>گوینده
+                <select id="finalizationSpeaker" disabled><option value="">ابتدا بازه را اعمال کنید</option></select>
+              </label>
+              <label>رویدادهای مهم
+                <select id="finalizationEvent" disabled><option value="">ابتدا بازه را اعمال کنید</option></select>
+              </label>
+              <label>موضوع کلی
+                <select id="finalizationGeneralTopic"><option value="">همه موضوعات کلی</option></select>
+              </label>
+              <label>موضوع مشخص
+                <select id="finalizationSpecificTopic"><option value="">همه موضوعات مشخص</option></select>
+              </label>
+            </div>
+            <aside id="detectedPersonRegistryPrompt" class="registry-inline-prompt hidden" aria-live="polite">
+              <div class="registry-prompt-copy">
+                <span class="eyebrow">تکمیل شناسنامه</span>
+                <h4>گوینده شناسایی‌شده <b id="quickRegistryDetectedName">—</b> در شناسنامه ثبت نشده است.</h4>
+                <p>اطلاعات استخراج‌شده را بررسی کنید و بدون خروج از نهایی‌سازی، شخص را به شناسنامه بیفزایید.</p>
+              </div>
+              <form id="quickRegistryPersonForm" class="quick-registry-form">
+                <input id="quickRegistrySourceMessageId" type="hidden">
+                <div class="form-grid three">
+                  <label>نام کامل<input id="quickRegistryPersonName" required></label>
+                  <label>سمت<input id="quickRegistryPersonPosition" placeholder="در صورت تشخیص در خبر"></label>
+                  <label>دسته<select id="quickRegistryPersonCategory"><option value="">انتخاب دسته</option></select></label>
+                </div>
+                <label>نام‌های دیگر<input id="quickRegistryPersonAliases" placeholder="با | جدا کنید"></label>
+                <div class="button-row"><button type="submit" class="outline-button" id="addDetectedPersonToRegistry">+ افزودن به شناسنامه</button><button type="button" class="text-button" id="cancelQuickRegistryPerson">فعلاً نه</button></div>
+              </form>
+            </aside>
+            <aside id="deskSubjectEditor" class="desk-subject-editor hidden" aria-live="polite">
+              <div class="block-head">
+                <div>
+                  <span class="eyebrow">مرحلهٔ اصلاح مشخصات</span>
+                  <h4 id="deskSubjectHeading">مشخصات انتخاب‌شده</h4>
+                  <p id="deskSubjectHint">ابتدا مشخصات فرد یا رویداد را اصلاح کنید؛ سپس برای هر پیام اقدام جداگانه انجام دهید.</p>
+                </div>
+              </div>
+              <div id="deskPersonFields" class="form-grid three hidden">
+                <label>نام گوینده<input id="deskPersonName" placeholder="نام کامل گوینده"></label>
+                <label>سمت<input id="deskPersonPosition" placeholder="سمت یا عنوان رسمی"></label>
+                <label>دسته<select id="deskPersonCategory"><option value="">انتخاب دسته</option></select></label>
+              </div>
+              <div id="deskEventFields" class="form-grid three hidden">
+                <label>عنوان رویداد<input id="deskEventTitle" placeholder="عنوان رویداد"></label>
+                <label>محل رویداد<input id="deskEventLocation" placeholder="محل وقوع"></label>
+                <label>زمان رویداد<input id="deskEventTime" placeholder="زمان وقوع"></label>
+              </div>
+            </aside>
+            <div class="analysis-selection-bar">
+              <div><b id="analyzedMessageCount">۰ خبر</b><span id="analyzedSelectionHint">گوینده را انتخاب کنید.</span></div>
+              <div class="button-row"><button type="button" class="primary-button" id="createDraftFromAnalysis" disabled>ساخت پیش‌نویس از خبرهای انتخاب‌شده</button><button type="button" class="outline-button" data-create-manual-draft>+ خبر دستی مستقل</button></div>
+            </div>
+            <div id="analyzedMessageList" class="analyzed-message-list">
+              <div class="empty-mini">برای مشاهده خبرها، یک گوینده را از فیلتر بالا انتخاب کنید.</div>
+            </div>
+          </article>
+          </section>
+          <section class="finalization-view finalization-drafts-view hidden" id="finalizationDrafts" aria-labelledby="finalizationDraftsTitle">
+          <div class="editor-layout">
+            <aside class="panel drafts-panel">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۲: بازبینی و خروجی</span><h3 id="finalizationDraftsTitle">پیش‌نویس‌ها</h3><p>پیش‌نویس‌های ساخته‌شده به‌دست کاربر و خودکار جداگانه قابل مشاهده‌اند.</p></div></div>
+              <button type="button" class="primary-button" data-create-manual-draft>+ خبر دستی</button>
+              <div class="segmented"><button class="active" data-draft-filter="">همه</button><button data-draft-filter="draft">پیش‌نویس</button><button data-draft-filter="finalized">نهایی</button></div>
+              <div class="segmented draft-origin-filter"><button class="active" data-draft-origin="">همه منابع</button><button data-draft-origin="manual">ساختهٔ انسان</button><button data-draft-origin="automation">ساختهٔ خودکار</button></div>
+              <div id="draftList" class="draft-list"></div>
+            </aside>
+            <article class="panel editor-panel">
+              <div id="emptyEditor" class="empty-state"><div class="empty-icon">✎</div><h3>یک پیش‌نویس را انتخاب کنید</h3><p>یا در همین صفحه یک گوینده و خبرهای تحلیل‌شده او را انتخاب کنید.</p></div>
+              <form id="draftEditor" class="hidden">
+                <div class="editor-head">
+                  <div><span class="eyebrow">میز تدوین</span><h2 id="draftHeading">خبر جدید</h2></div>
+                  <span class="status-pill draft" id="draftStatus">پیش‌نویس</span>
+                </div>
+                <div class="form-grid two">
+                  <label>عنوان داخلی<input id="draftTitle" placeholder="برای شناسایی این پیش‌نویس"></label>
+                  <label>گوینده<select id="draftPerson"></select></label>
+                  <label>دسته<input id="draftCategory" placeholder="مثلاً مسئولان دولت"></label>
+                  <label>موضوع<select id="draftTopic"></select></label>
+                  <label>سوژه اصلی خبر<input id="mainSubject" placeholder="یک عبارت کوتاه چندکلمه‌ای از سوژهٔ اصلی خبر"></label>
+                  <label>محل بیان<input id="draftLocation" placeholder="مثلاً نشست خبری یا کانال شخصی"></label>
+                </div>
+                <div class="source-link-row"><label>لینک منبع<input id="draftSourceUrl" type="url" placeholder="https://…"></label><button type="button" class="outline-button" id="createShortLink">ساخت لینک کوتاه و QR</button></div>
+                <div id="shortLinkPreview" class="short-link-preview hidden"><a id="shortLinkAnchor" target="_blank" rel="noopener"></a><img id="draftQrCode" alt="کد QR لینک خبر"></div>
+                <div class="editor-block">
+                  <div class="block-head"><div><h3>متن پایه</h3><p>ترکیب متن کامل یا بخش‌های منتخب پیام‌ها</p></div><button type="button" class="outline-button" id="generateBase">تولید متن پایه</button></div>
+                  <textarea id="draftBase" rows="9" placeholder="متن پایه خبر را اینجا تدوین کنید…"></textarea>
+                </div>
+                <div class="editor-block">
+                  <div class="block-head"><div><h3 id="summaryBlockHeading">خلاصه‌های گوینده</h3><p id="summaryBlockHint">مدل دوم، مطالب را از زبان همان گوینده یکپارچه می‌کند.</p></div><button type="button" class="outline-button" id="generateAllSummaries">تولید هر سه خلاصه</button></div>
+                  <label>خلاصه یک‌پاراگرافی<textarea id="summaryParagraph" rows="5"></textarea></label>
+                  <div class="form-grid two">
+                    <label>خلاصه یک‌خطی<textarea id="summarySentence" rows="3"></textarea></label>
+                    <label>جزئیات موضع<textarea id="summaryTitle" rows="3" placeholder="مثلاً کاهش مالیات واحدهای تولیدی"></textarea></label>
+                  </div>
+                </div>
+                <section id="bulletinCandidatePreview" class="bulletin-candidate-preview" aria-live="polite" aria-labelledby="bulletinCandidateTitle">
+                  <div class="candidate-preview-head">
+                    <div><span class="eyebrow">پیش‌نمایش نامزد بولتن</span><h3 id="bulletinCandidateTitle">خروجی آماده برای نهایی‌سازی</h3></div>
+                    <span class="status-pill draft" id="bulletinCandidateStatus">در حال تکمیل</span>
+                  </div>
+                  <p class="candidate-preview-note">پیش از نهایی‌سازی، همه اجزایی را که در بولتن نمایش داده می‌شوند بررسی کنید.</p>
+                  <dl class="candidate-meta-grid">
+                    <div><dt>نام</dt><dd id="candidatePersonName">—</dd></div>
+                    <div><dt>سمت</dt><dd id="candidatePersonPosition">—</dd></div>
+                    <div><dt>دسته</dt><dd id="candidateCategory">—</dd></div>
+                    <div><dt>موضوع کلی</dt><dd id="candidateGeneralTopic">—</dd></div>
+                    <div><dt>سوژه اصلی</dt><dd id="candidateMainSubject">—</dd></div>
+                    <div><dt>موضوع مشخص</dt><dd id="candidateSpecificTopic">—</dd></div>
+                  </dl>
+                  <div class="candidate-summary-list">
+                    <article><h4>خلاصه یک‌پاراگرافی</h4><p id="candidateSummaryParagraph">—</p></article>
+                    <article><h4>خلاصه یک‌خطی</h4><p id="candidateSummarySentence">—</p></article>
+                    <article><h4>جزئیات موضع</h4><p id="candidateSummaryTitle">—</p></article>
+                  </div>
+                </section>
+                <details class="source-box" open><summary>پیام‌های مبنا <span id="inputCount"></span></summary><div id="draftInputs"></div></details>
+                <details class="source-box"><summary>تاریخچه نسخه‌ها</summary><div id="draftVersions"></div></details>
+                <div class="finalization-datetime">
+                  <div><span class="eyebrow">ثبت در بولتن</span><h3>روز و ساعت نهایی‌سازی</h3><p>زمانی را انتخاب کنید که باید در سابقه خبر و خروجی بولتن ثبت شود.</p></div>
+                  <div class="form-grid two">
+                    <label>روز (جلالی)<input id="draftFinalizationDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۷" autocomplete="off" data-jalali-date></label>
+                    <label>ساعت<input id="draftFinalizationTime" type="time" dir="ltr" step="60"></label>
+                  </div>
+                </div>
+                <div class="sticky-actions">
+                  <button type="button" class="danger-button" id="deleteDraft">حذف پیش‌نویس</button>
+                  <button type="button" class="outline-button" id="saveDraft">ذخیره نسخه</button>
+                  <button type="button" class="primary-button" id="finalizeDraft">نهایی‌سازی خبر</button>
+                </div>
+              </form>
+            </article>
+          </div>
+          </section>
+        </section>
+
+        <section class="page" id="page-monitoring">
+          <div class="panel monitoring-head">
+            <div class="panel-heading">
+              <div><span class="eyebrow">نظارت</span><h3>نظارت بر ارسال‌کنندگان پیام</h3><p>تاریخچهٔ کامل تعداد ارسال‌ها، روند روزانهٔ بازه و میانگین امتیازهای خودکار هر ارسال‌کننده.</p></div>
+              <label class="monitoring-window">بازه نمایش<select id="monitoringDays"><option value="14">۱۴ روز</option><option value="30" selected>۳۰ روز</option><option value="60">۶۰ روز</option><option value="90">۹۰ روز</option></select></label>
+            </div>
+            <div id="monitoringMetrics" class="metrics-grid"></div>
+          </div>
+          <div class="content-grid two-thirds monitoring-layout">
+            <article class="panel"><div class="panel-heading"><div><h3 id="monitoringChartTitle">روند پیام‌های دریافتی</h3><p id="monitoringChartSubtitle">روزهای دارای پیام، از راست به چپ نمایش داده می‌شوند؛ برای دیدن سهم ارسال‌کنندگان همان روز، روی ستون آن کلیک کنید.</p></div><button id="monitoringResetChart" class="text-button hidden" type="button">بازگشت به روند</button></div><div id="monitoringDailyChart" class="monitoring-daily-chart" dir="rtl"></div></article>
+            <article class="panel"><div class="panel-heading"><div><h3>راهنمای امتیاز خودکار</h3><p>امتیازدهی دستی حذف شده و امتیاز از زمان ارسال، تحلیل و نهایی‌سازی ساخته می‌شود.</p></div></div><div class="rating-guide"><b>★ ۱ تا ۵</b><span>۸ تا ۲۳: امتیاز پایهٔ بالا؛ ۲۳ تا ۲۴: کمتر؛ ۰ تا ۸: پایین. تحلیل موتور اول و استفاده در خبر نهایی، هرکدام یک امتیاز می‌افزاید.</span></div></article>
+          </div>
+          <article class="panel monitoring-senders-panel"><div class="panel-heading"><div><h3>ارسال‌کنندگان</h3><p>نامی که به پروفایل متصل شده است در اینجا نمایش داده می‌شود. کل پیام و میانگین امتیاز خودکار از همهٔ تاریخچه محاسبه می‌شود.</p></div></div><div class="table-wrap"><table><thead><tr><th>پروفایل / ارسال‌کننده</th><th>نوع</th><th>کل پیام</th><th>پیام‌های امتیازدهی‌شده</th><th>میانگین امتیاز خودکار</th><th>پیام‌ها در بازه و روزها</th></tr></thead><tbody id="monitoringRows"></tbody></table></div></article>
+        </section>
+
+        <section class="page" id="page-garaye">
+          <article class="panel garaye-hero">
+            <div class="panel-heading"><div><span class="eyebrow">دیدبان تحریریه</span><h3>گرایه؛ نبض خبرهای نهایی‌شده</h3><p>همهٔ روندهای محتوایی این بخش فقط از خبرهای نهایی‌شده ساخته می‌شوند.</p></div></div>
+            <div class="garaye-filter">
+              <div class="garaye-filter-title"><span class="eyebrow">تعیین بازه</span><small>از میان بازه‌های آماده انتخاب کنید یا تاریخ و ساعت دلخواه وارد کنید.</small></div>
+              <label>بازهٔ آماده<select id="garayeRangePreset"><option value="today">امروز</option><option value="week">هفتهٔ جاری</option><option value="last7">۷ روز اخیر</option><option value="last30" selected>۳۰ روز اخیر</option><option value="last90">۹۰ روز اخیر</option><option value="year">سال جاری</option><option value="custom">بازهٔ دلخواه</option></select></label>
+              <label>از تاریخ جلالی<input id="garayeFrom" class="jalali-date-input" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۱" autocomplete="off" data-jalali-date></label>
+              <label>ساعت از<input id="garayeFromTime" type="time" dir="ltr" step="60"></label>
+              <label>تا تاریخ جلالی<input id="garayeTo" class="jalali-date-input" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۳۰" autocomplete="off" data-jalali-date></label>
+              <label>ساعت تا<input id="garayeToTime" type="time" dir="ltr" step="60"></label>
+              <button id="applyGarayeFilters" class="primary-button" type="button">اعمال بازه</button>
+            </div>
+          </article>
+          <div id="metrics" class="metrics-grid"></div>
+          <article class="panel overview-status-panel">
+            <div class="panel-heading"><div><h3>وضعیت جریان اخبار</h3><p>میزان پیشرفت غربالگری و سهم منابع فعال</p></div></div>
+            <div class="overview-status-layout"><div id="statusDonut" class="donut-wrap"></div><div id="sourceSummary" class="source-summary"></div></div>
+          </article>
+          <article class="panel trend-panel">
+            <div class="panel-heading trend-heading"><div><span class="eyebrow">روند موضوعات</span><h3>موضوعات خبرهای نهایی‌شده</h3><p>روند روزانهٔ موضوع‌ها بر پایهٔ زمان نهایی‌سازی خبر است.</p></div><span class="trend-window" id="trendWindow">—</span></div>
+            <div id="topicTrendChart" class="trend-chart skeleton-box">در حال محاسبه روند موضوعات…</div><div id="topicTrendLegend" class="trend-legend"></div>
+          </article>
+          <div class="content-grid two-thirds garaye-main-grid">
+            <article class="panel"><div class="panel-heading"><div><h3>ابرواژگان گرایه</h3><p>واژه‌های محتواییِ پالایش‌شده از خبرهای نهایی؛ واژه‌های عمومی و کم‌معنا حذف شده‌اند.</p></div></div><div id="garayeWordCloud" class="garaye-word-cloud" aria-live="polite"></div></article>
+            <article class="panel"><div class="panel-heading"><div><h3>روند روزانهٔ ابرواژگان</h3><p>یک واژه را انتخاب کنید تا تغییر تکرار آن در روزهای بازه نمایش داده شود.</p></div><label class="word-trend-select">واژه<select id="garayeWordTrendSelect"><option value="">واژه‌ای موجود نیست</option></select></label></div><div id="garayeWordTrend" class="garaye-mini-chart"></div></article>
+          </div>
+          <div class="content-grid two-thirds garaye-main-grid"><article class="panel"><div class="panel-heading"><div><h3>ترند گویندگان</h3><p>بر پایهٔ خبرهای نهایی‌شدهٔ هر گوینده</p></div></div><div id="garayeSpeakerTrends" class="garaye-rank-list"></div></article><article class="panel"><div class="panel-heading"><div><h3>ترند سوژه‌های پربازتاب</h3><p>سوژه‌های اصلیِ خبرهایی که در پربازتاب‌های نهایی‌شده حضور دارند؛ نه عنوان خود پربازتاب‌ها.</p></div></div><div id="garayeAttentionTrend" class="garaye-rank-list"></div></article></div>
+        </section>
+
+        <section class="page" id="page-high-attention">
+          <article class="panel analysis-workbench">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">مدل اول · API شماره ۸</span>
+                <h3>تولید محورهای پربازتاب</h3>
+                <p>ابتدا روز نهایی‌سازی را انتخاب کنید، خبرهای همان روز را برگزینید و سپس محورهای پربازتاب را تولید و ویرایش کنید.</p>
+              </div>
+            </div>
+            <div class="bulletin-day-picker">
+              <label>روز نهایی‌سازی خبرها<select id="highAttentionDay"><option value="">انتخاب روز نهایی‌سازی</option></select></label>
+              <label>انتخاب تقویمی روز<input id="highAttentionJalaliDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date></label>
+              <p id="highAttentionDayHint">روز را از فهرست خبرهای نهایی یا از تقویم انتخاب کنید؛ تایپ دستی تاریخ جلالی هم پذیرفته می‌شود.</p>
+            </div>
+            <div class="bulletin-drafts-toolbar hidden" id="highAttentionDraftsToolbar">
+              <label class="select-all-label"><input id="selectAllHighAttentionDrafts" type="checkbox"> انتخاب همه خبرهای این روز</label>
+              <span id="highAttentionDraftsSelectionHint">خبرهای نهایی همین روز</span>
+            </div>
+            <div id="highAttentionDrafts" class="sortable-list"><div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div></div>
+            <button type="button" class="primary-button" id="generateHighAttention" disabled>تولید پربازتاب</button>
+          </article>
+          <article class="panel high-attention-editor hidden" id="highAttentionEditor">
+            <div class="editor-head">
+              <div><span class="eyebrow">میز ویرایش پربازتاب</span><h2>تیتر و توضیح محورهای منتخب</h2></div>
+              <span class="status-pill draft" id="highAttentionStatus">پیش‌نویس</span>
+            </div>
+            <p class="editor-help">هر تیتر و توضیح به‌صورت جداگانه ذخیره می‌شود. پس از نهایی‌سازی، برای انتخاب در خبرنامه در دسترس خواهد بود.</p>
+            <div id="highAttentionItems" class="high-attention-items"></div>
+            <div class="sticky-actions">
+              <button type="button" class="outline-button" id="saveHighAttention">ذخیره ویرایش‌ها</button>
+              <button type="button" class="primary-button" id="finalizeHighAttention">نهایی‌سازی پربازتاب</button>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><div><h3>تولیدهای پربازتاب این روز</h3><p>نسخه‌های پیش‌نویس و نهایی‌شدهٔ همان روز</p></div></div>
+            <div id="highAttentionRuns" class="draft-list"><div class="empty-mini">روز را انتخاب کنید.</div></div>
+          </article>
+        </section>
+
+        <section class="page" id="page-bulletins">
+          <div class="content-grid bulletin-grid">
+            <article class="panel">
+              <div class="panel-heading"><div><h3>ساخت خبرنامه</h3><p>خبرهای نهایی را انتخاب و ترتیب انتشار را مشخص کنید؛ این بخش فقط خروجی HTML، Word و PDF را صفحه‌آرایی می‌کند.</p></div></div>
+              <div class="form-grid two bulletin-meta-fields">
+                <label>عنوان خبرنامه<input id="bulletinTitle" value="خبرنامه گرایه"></label>
+                <label>شماره خبرنامه<input id="bulletinIssue" type="number" min="1" placeholder="خودکار"></label>
+                <label>نوع گزارش<select id="bulletinMode"><option value="concise">کوتاه</option><option value="full">کامل</option></select></label>
+                <label class="full">مقدمه خبرنامه<textarea id="bulletinIntroduction" rows="5" maxlength="8000" placeholder="مقدمه را دقیقاً به شکلی که باید در خبرنامه چاپ شود بنویسید. در صورت خالی‌بودن، صفحهٔ مقدمه ایجاد نمی‌شود."></textarea></label>
+              </div>
+              <div class="bulletin-day-picker">
+                <label>مبنای انتخاب خبرها<select id="bulletinFinalizationDay"><option value="">همهٔ خبرهای نهایی‌شده</option></select></label>
+                <label>انتخاب تقویمی روز<input id="bulletinJalaliDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date></label>
+                <p id="bulletinDayHint">روز را از فهرست یا تقویم انتخاب کنید؛ خروجی فقط از خبرهایی ساخته می‌شود که خودتان تیک زده‌اید.</p>
+              </div>
+              <div class="bulletin-drafts-toolbar hidden" id="bulletinDraftsToolbar">
+                <label class="select-all-label"><input id="selectAllFinalizedDrafts" type="checkbox"> انتخاب همه</label>
+                <span id="bulletinDraftsSelectionHint">خبرهای نهایی همین روز</span>
+              </div>
+              <div id="finalizedDrafts" class="sortable-list bulletin-drafts-scroll"><div class="empty-mini">هنوز خبر نهایی وجود ندارد.</div></div>
+              <section class="bulletin-high-attention-picker" aria-labelledby="bulletinHighAttentionTitle">
+                <div class="block-head"><div><h4 id="bulletinHighAttentionTitle">پربازتاب‌های نهایی</h4><p>محورهای پربازتاب نهایی‌شدهٔ همین روز را برای درج در بخش پربازتاب بولتن انتخاب کنید.</p></div></div>
+                <div id="finalizedHighAttentionItems" class="sortable-list"><div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div></div>
+              </section>
+              <button class="primary-button wide" id="createManualBulletin">ساخت و آماده‌سازی خروجی</button>
+            </article>
+            <article class="panel preview-card">
+              <span class="eyebrow">پیش‌نمایش</span><h2 id="previewTitle">خبرنامه گرایه</h2><div class="preview-line"></div>
+              <p id="previewMeta">شماره خبرنامه پس از ساخت ثبت می‌شود.</p>
+              <div id="previewItems" class="preview-items"><div class="empty-mini">خبرهای نهایی انتخاب‌شده اینجا نمایش داده می‌شوند.</div></div>
+            </article>
+          </div>
+          <article class="panel">
+            <div class="panel-heading"><div><h3>خروجی‌ها و اجراهای اخیر</h3><p>پیش‌نمایش مرجع HTML، PDF مستقیم، Word قابل‌ویرایش و بسته کامل</p></div></div>
+            <div class="table-wrap"><table><thead><tr><th>شناسه</th><th>شماره</th><th>تاریخ</th><th>وضعیت</th><th>خبر</th><th>خروجی‌ها و عملیات</th></tr></thead><tbody id="bulletinRows"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="page" id="page-people">
+          <article class="panel people-registry-panel">
+            <div class="panel-heading"><div><h3>شناسنامه اشخاص</h3><p>نام اصلی، سمت، دسته، تصویر، نام‌های دیگر و کانال وابسته</p></div><div class="button-row"><button type="button" class="outline-button" id="showPeopleSettings" aria-expanded="false" aria-controls="peopleSettingsPanel">⚙ تنظیمات</button><button class="primary-button" id="showPersonForm">+ افزودن شخص</button></div></div>
+            <section class="people-settings-panel hidden" id="peopleSettingsPanel" aria-label="تنظیمات شناسنامه">
+              <article>
+                <span class="eyebrow">ورود گروهی</span>
+                <h4>بارگذاری شناسنامه از اکسل</h4>
+                <p>فایل اکسل یا CSV را انتخاب کنید تا اشخاص به شناسنامه افزوده یا به‌روزرسانی شوند.</p>
+                <label class="outline-button import-file-button">انتخاب و بارگذاری اکسل<input id="peopleImportFile" type="file" accept=".xlsx,.xlsm,.csv" hidden></label>
+              </article>
+              <article>
+                <span class="eyebrow">دسته‌بندی</span>
+                <h4>تعریف دستهٔ جدید</h4>
+                <p>دسته را مستقل از ثبت یا ویرایش شخص ایجاد کنید تا بلافاصله در همهٔ فهرست‌های دسته‌بندی قابل انتخاب باشد.</p>
+                <div class="form-grid two">
+                  <label>عنوان دستهٔ جدید<input id="categoryCreateNew" maxlength="120" placeholder="مثلاً مسئولان استانی"></label>
+                </div>
+                <div class="button-row"><button type="button" class="outline-button" id="createPersonCategory">افزودن دستهٔ جدید</button></div>
+                <hr>
+                <h4>تغییر نام دسته</h4>
+                <p>دستهٔ فعلی را از فهرست انتخاب و عنوان جدید را مستقیماً وارد کنید. نام دسته در شناسنامه و پیش‌نویس‌های وابسته هم‌زمان به‌روز می‌شود.</p>
+                <div class="form-grid two">
+                  <label>دسته فعلی<select id="categoryRenameOld"><option value="">انتخاب دسته</option></select></label>
+                  <label>عنوان جدید<input id="categoryRenameNew" maxlength="120" placeholder="عنوان جدید دسته"></label>
+                </div>
+                <div class="button-row"><button type="button" class="outline-button" id="renamePersonCategory">اعمال تغییر نام دسته</button></div>
+              </article>
+            </section>
+            <form id="personForm" class="inline-form hidden">
+              <input id="personId" type="hidden">
+              <div class="form-grid three">
+                <label>نام کامل<input id="personName" required></label>
+                <label>سمت<input id="personPosition"></label>
+                <label>دسته<select id="personCategory"><option value="">انتخاب دسته</option></select></label>
+                <label>وضعیت<select id="personRegistry"><option value="inside">داخل شناسنامه</option><option value="outside">خارج شناسنامه</option></select></label>
+                <label>نام‌های دیگر<input id="personAliases" placeholder="با | جدا کنید"></label>
+                <label>نام کاربری کانال<input id="personUsername" placeholder="بدون @"></label>
+                <label>تصویر شخص<input id="personPortrait" type="file" accept="image/jpeg,image/png,image/webp"></label>
+              </div>
+              <div class="button-row"><button type="submit" class="primary-button">ذخیره شناسنامه</button><button type="button" class="ghost-button" id="cancelPerson">انصراف</button></div>
+            </form>
+            <label class="search-field standalone"><span>⌕</span><input id="peopleSearch" placeholder="جست‌وجوی شخص"></label>
+            <div class="table-wrap people-table-wrap"><table><thead><tr><th>شخص</th><th>سمت</th><th>دسته</th><th>وضعیت</th><th>نام‌های دیگر</th><th>کانال</th><th></th></tr></thead><tbody id="peopleRows"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="page" id="page-person-profile">
+          <article class="panel person-profile-page">
+            <div class="panel-heading person-profile-page-heading">
+              <div><span class="eyebrow">شناسنامه اشخاص</span><h3>پروفایل شخص</h3><p>مشخصات، کانال‌های وابسته و خبرهای منتسب به این شخص</p></div>
+              <div class="button-row"><button type="button" class="outline-button" id="backToPeople">بازگشت به فهرست اشخاص</button><button type="button" class="primary-button" id="editProfilePerson">ویرایش شخص</button></div>
+            </div>
+            <div id="personProfileContent" class="person-profile-content"><div class="empty-mini">در حال دریافت پروفایل شخص…</div></div>
+          </article>
+        </section>
+
+        <section class="page" id="page-sources">
+          <article class="panel">
+            <div class="panel-heading"><div><h3>منابع پایش</h3><p>کانال اشخاص و گروه پشتیبانی را یکجا مدیریت کنید.</p></div></div>
+            <form id="sourceForm" class="inline-form always-visible">
+              <div class="form-grid four">
+                <label>شناسه عددی<input id="sourceChatId" type="number"></label>
+                <label>نام کاربری<input id="sourceUsername" placeholder="بدون @"></label>
+                <label>عنوان<input id="sourceTitle"></label>
+                <label>نوع<select id="sourceType"><option value="channel">کانال</option><option value="group">گروه</option><option value="supergroup">سوپرگروه</option></select></label>
+              </div>
+              <button type="submit" class="primary-button">ثبت منبع</button>
+            </form>
+            <div id="sourcesGrid" class="source-cards"></div>
+          </article>
+        </section>
+
+        <section class="page" id="page-users">
+          <article class="panel">
+            <div class="panel-heading"><div><h3>پروفایل کاربران و سطوح دسترسی</h3><p>حساب، تصویر، نقش، رمز عبور و پیوند اختیاری با هویت ارسال‌کنندهٔ پیام</p></div><button class="primary-button" id="showUserForm">+ کاربر جدید</button></div>
+            <form id="userForm" class="inline-form hidden">
+              <input id="adminUserId" type="hidden">
+              <div class="form-grid three">
+                <label>نام کاربری<input id="adminUsername" required autocomplete="off" placeholder="latin_username"></label>
+                <label>نام نمایشی<input id="adminFullName" required></label>
+                <label>نقش<select id="adminRole"></select></label>
+                <label>رمز عبور<input id="adminPassword" type="password" minlength="10" autocomplete="new-password" placeholder="برای ویرایش می‌تواند خالی باشد"></label>
+                <label>پیوند به ارسال‌کنندهٔ بله<select id="adminSenderKey"><option value="">بدون پیوند به ارسال‌کننده</option></select></label>
+                <label>تصویر پروفایل<input id="adminUserPortrait" type="file" accept="image/png,image/jpeg,image/webp"></label>
+                <label class="check-label"><input id="adminActive" type="checkbox" checked> حساب فعال باشد</label>
+              </div>
+              <div id="rolePermissions" class="permission-box"></div>
+              <div class="button-row"><button type="submit" class="primary-button">ذخیره کاربر</button><button type="button" class="ghost-button" id="cancelUser">انصراف</button></div>
+            </form>
+            <div class="table-wrap"><table><thead><tr><th>تصویر</th><th>کاربر</th><th>نام پروفایل</th><th>هویت ارسال‌کننده</th><th>نقش</th><th>وضعیت</th><th>آخرین ورود</th><th>ساخته‌شده توسط</th><th></th></tr></thead><tbody id="usersRows"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="page" id="page-system">
+          <div class="metrics-grid" id="systemMetrics"></div>
+          <article class="panel"><div class="panel-heading"><div><h3>توکن و قیمت</h3><p>مصرف ثبت‌شدهٔ هر مدل و هزینهٔ محاسبه‌شده بر پایهٔ نرخ هر یک میلیون توکن (دلار)</p></div><b id="aiUsageTotal">$0.000000</b></div><div class="table-wrap"><table><thead><tr><th>نام مدل</th><th>توکن ورودی</th><th>توکن خروجی</th><th>قیمت ورودی / میلیون</th><th>قیمت خروجی / میلیون</th><th>هزینه کل</th></tr></thead><tbody id="aiUsageRows"></tbody></table></div></article>
+          <div class="content-grid two-thirds">
+            <article class="panel"><div class="panel-heading"><div><h3>سلامت سرویس</h3><p>پایگاه داده، هوش، زمان‌بندی و تنظیمات عملیاتی</p></div><button class="outline-button" id="backupNow">پشتیبان فوری</button></div><div id="healthChecks" class="health-list"></div></article>
+            <article class="panel"><div class="panel-heading"><div><h3>رویدادهای اخیر</h3><p>ردپای فعالیت سامانه</p></div></div><div id="eventList" class="event-list"></div></article>
+          </div>
+          <article class="panel live-update-panel" data-permission="system.manage">
+            <div class="panel-heading"><div><span class="eyebrow">به‌روزرسانی زنده</span><h3>آپلود نسخه جدید بدون توقف دستی</h3><p>بسته ZIP نسخه جدید را انتخاب کنید. فایل‌های برنامه جایگزین می‌شوند و اگر سرویس با حالت نظارت‌شده اجرا شده باشد، سامانه خودش راه‌اندازی مجدد می‌شود. داده، .env و پشتیبان‌ها دست نخورده می‌مانند.</p></div></div>
+            <form id="liveUpdateForm" class="inline-form always-visible">
+              <label class="outline-button import-file-button">انتخاب فایل ZIP نسخه جدید<input id="liveUpdateFile" type="file" accept=".zip,application/zip" hidden></label>
+              <div class="button-row"><button type="submit" class="primary-button" id="applyLiveUpdate">اعمال به‌روزرسانی</button></div>
+              <div id="liveUpdateStatus" class="crawler-recovery-status">هنوز بسته‌ای از این صفحه اعمال نشده است.</div>
+            </form>
+          </article>
+          <article class="panel crawler-recovery-panel">
+            <div class="panel-heading"><div><span class="eyebrow">بازیابی صف ربات</span><h3>پیام‌های ثبت‌نشدهٔ ۴۸ ساعت گذشته</h3><p>فقط پیام‌های موجود در صف API ربات یا آرشیو خامِ دریافت‌شدهٔ سامانه تطبیق داده می‌شوند؛ هیچ کرولر یا مرورگری اجرا نمی‌شود و زمان اصلی پیام حفظ می‌گردد.</p></div><button class="primary-button" id="startCrawlerRecovery">بازیابی صف ۴۸ ساعت</button></div>
+            <div id="crawlerRecoveryStatus" class="crawler-recovery-status" aria-live="polite">هنوز بازسازی ۴۸ساعته اجرا نشده است.</div>
+          </article>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="messageDialog">
+    <div class="dialog-head"><h3>جزئیات پیام</h3><button class="icon-button" data-close-dialog>×</button></div>
+    <div id="messageDetail"></div>
+  </dialog>
+  <dialog id="userProfileDialog">
+    <div class="dialog-head"><h3>نمایه و عملکرد کاربر</h3><button class="icon-button" data-close-dialog>×</button></div>
+    <div id="userProfileDetail"></div>
+  </dialog>
+  <div class="jalali-picker" id="jalaliPicker" hidden>
+    <div class="jalali-picker-head">
+      <button type="button" class="icon-button" id="jalaliPickerNext" aria-label="ماه بعد">›</button>
+      <b id="jalaliPickerMonth">—</b>
+      <button type="button" class="icon-button" id="jalaliPickerPrev" aria-label="ماه قبل">‹</button>
+    </div>
+    <div class="jalali-picker-weekdays" aria-hidden="true"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
+    <div class="jalali-picker-days" id="jalaliPickerDays"></div>
+    <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/admin/assets/wordcloud-layout.js?v=11.33.0" defer></script>
+  <script src="/admin/assets/app.js?v=11.33.0" defer></script>
+</body>
+</html>
