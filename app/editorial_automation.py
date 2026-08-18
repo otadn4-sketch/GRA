@@ -442,7 +442,7 @@ class EditorialAutomationService:
             message_inputs=[{"message_id": int(row["id"]), "sort_order": 0}],
             base_text=self._text_of(row),
             created_by="automation_stage_two",
-            category_name="رویدادهای مهم ایران و جهان",
+            category_name="وقایع و رویدادهای مهم ایران و جهان",
             content_type="event",
             event_title=title,
             event_entities=[str(value) for value in entities],

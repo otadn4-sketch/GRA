@@ -31,6 +31,7 @@ from .bulletin_models import (
     category_key,
     category_section_title,
     category_title,
+    is_event_category,
 )
 from .bulletin_validation import is_generic_url, valid_public_url
 from .config import PROJECT_ROOT, Settings
@@ -401,17 +402,11 @@ class BulletinDataBuilder:
                 editorial_order=int(item.get("editorial_order") or 0),
                 merged_statement_ids=[statement_id],
                 public_exclusion_reason=exclusion_reason,
+                footnote=str(item.get("footnote") or "").strip(),
             )
-            is_event = str(item.get("content_type") or "").strip().casefold() in {
-                "event",
-                "رویداد",
-                "رویداد مهم ایران و جهان",
-                "رویدادهای مهم ایران و جهان",
-            } or str(
-                item.get("category")
-                or item.get("editorial_category")
-                or ""
-            ).strip() in {"رویدادهای مهم ایران و جهان", "رویداد مهم ایران و جهان"}
+            is_event = is_event_category(item.get("content_type")) or is_event_category(
+                item.get("category") or item.get("editorial_category")
+            )
             # شناسنامه category is the sole grouping authority for people.
             registry_category = str((person_record or {}).get("category") or "").strip()
             if is_event:
@@ -449,20 +444,16 @@ class BulletinDataBuilder:
             for _, (_, _, statement) in ordered_temporary
         ]
 
-        # Populate categories in required order and continuous person numbering.
-        # Fixed registry sections first, then any exact custom شناسنامه labels,
-        # and always finish with «رویدادهای مهم ایران و جهان».
+        # Populate categories in the publication section order: events first,
+        # then the registry groups, then any exact custom شناسنامه labels.
         present_keys = {entry[0] for entry in temporary}
         ordered_keys: list[str] = [
-            key for key, _title in CATEGORY_ORDER if key != "events" and key in present_keys
+            key for key, _title in CATEGORY_ORDER if key in present_keys
         ]
         custom_keys = sorted(
             key for key in present_keys if key.startswith("custom:")
         )
-        ordered_keys.extend(custom_keys)
-        if "events" in present_keys:
-            ordered_keys.append("events")
-        # Keep a trailing fallback only when something truly has no registry category.
+        ordered_keys.extend(key for key in custom_keys if key not in ordered_keys)
         if "other" in present_keys and "other" not in ordered_keys:
             ordered_keys.append("other")
 

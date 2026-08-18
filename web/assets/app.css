@@ -285,3 +285,54 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 @media(max-width:1050px){.quick-start-stepper{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.quick-start-stepper,.stream-more-bar{grid-template-columns:1fr;display:grid}.stream-more-bar button{width:100%}}
 
+/* v11.34 — 24h clocks, stream filters, quick-start window, footnotes, mobile nav. */
+.brand{display:flex;align-items:center;gap:12px}
+.sidebar-close{display:none;margin-right:auto;width:38px;height:38px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;border-radius:11px}
+.nav-backdrop{display:none}
+.stream-filters{display:grid;gap:14px;margin-bottom:4px;padding:16px;border:1px solid rgba(0,78,79,.16);border-radius:18px;background:linear-gradient(160deg,#eef7f5,#f8fcfb 62%,#fff)}
+.stream-filter-block{display:grid;gap:8px;padding:12px;border:1px solid rgba(0,78,79,.12);border-radius:14px;background:rgba(255,255,255,.78)}
+.stream-filter-label{margin:0;color:#006767;font-size:11px;font-weight:800;letter-spacing:.03em}
+.stream-filter-fields{display:grid;grid-template-columns:minmax(220px,1.4fr) minmax(140px,.8fr) minmax(160px,1fr);gap:12px 14px;align-items:end}
+.stream-filter-window{grid-template-columns:repeat(4,minmax(0,1fr))}
+.stream-filters .field{display:grid;gap:6px;margin:0;color:#003738;font-size:12px;min-width:0}
+.stream-filters .field.search-field{display:flex;align-items:center;gap:8px;padding:0 11px;min-height:44px}
+.stream-filters select,.stream-filters input[type="text"],.stream-filters .jalali-date-input{width:100%;min-height:44px;border:1px solid rgba(0,78,79,.22);border-radius:11px;background:#fff;padding:9px 11px;color:var(--ink)}
+.stream-filter-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}
+.stream-filter-actions button{min-height:44px;padding:0 18px}
+.time24{position:relative;display:flex;align-items:center;gap:6px;direction:ltr;min-width:0}
+.time24-native{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.time24 select{min-height:44px;min-width:4.8rem;flex:1;border:1px solid rgba(0,78,79,.22);border-radius:11px;background:#fff;color:var(--ink);padding:8px 10px;text-align:center;appearance:none}
+.time24-sep{color:#006767;font-weight:800;font-size:16px}
+.qs-window-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:4px 0 12px}
+.qs-window-card{display:grid;gap:10px;padding:16px;border:1px solid rgba(0,128,128,.22);border-radius:16px;background:linear-gradient(160deg,#fff,#edf8f6)}
+.qs-window-card header{display:grid;gap:2px}
+.qs-window-card h4{margin:0;color:#003738;font-size:16px}
+.qs-window-card .field{display:grid;gap:6px;margin:0;color:#003738;font-size:12px}
+.qs-window-card input,.qs-window-card .jalali-date-input{width:100%;min-height:44px;border:1px solid rgba(0,78,79,.22);border-radius:11px;background:#fff;padding:9px 11px}
+.footnote-field{display:grid;gap:6px;margin-top:12px;color:#003738;font-size:12px}
+.footnote-field textarea{width:100%;border:1px dashed rgba(0,128,128,.4);border-radius:12px;background:#f7fbfa;padding:10px 12px}
+@media(max-width:1050px){
+  .stream-filter-fields,.stream-filter-window{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:850px){
+  .nav-backdrop{display:block;position:fixed;inset:0;z-index:25;background:rgba(0,34,35,.42);backdrop-filter:blur(2px)}
+  .nav-backdrop[hidden]{display:none!important}
+  .sidebar{z-index:40;width:min(320px,88vw);padding-top:max(18px,env(safe-area-inset-top));padding-bottom:max(18px,env(safe-area-inset-bottom))}
+  .sidebar-close{display:grid;place-items:center}
+  body.nav-open{overflow:hidden}
+  .topbar{position:sticky;top:0;z-index:20;padding-top:max(12px,env(safe-area-inset-top))}
+  .icon-button,.primary-button,.outline-button,.ghost-button,.qs-step-tab,.nav-item,.quick-start-nav{min-height:44px}
+  .stream-filter-actions{display:grid;grid-template-columns:1fr;gap:8px}
+  .stream-filter-actions button{width:100%}
+  .qs-window-grid{grid-template-columns:1fr}
+  .selection-actions button{min-height:44px}
+  input,select,textarea{font-size:16px}
+  .main-nav{overflow:auto;padding-bottom:18px}
+}
+@media(max-width:560px){
+  .stream-filter-fields,.stream-filter-window{grid-template-columns:1fr}
+  .message-card{min-height:0}
+  .page-wrap{padding:12px}
+  .topbar h1{font-size:18px}
+}
+

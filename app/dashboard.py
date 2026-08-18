@@ -216,6 +216,7 @@ class EditorialDraftSave(BaseModel):
     main_subject: str | None = Field(default=None, max_length=300)
     oration_location: str | None = None
     source_url: str | None = None
+    footnote: str | None = Field(default=None, max_length=4000)
     change_reason: str = "ویرایش سردبیر"
 
 
@@ -306,11 +307,80 @@ class AutomationStageStart(BaseModel):
 
 
 _DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+_PM_MARKERS = ("pm", "p.m", "p.m.", "ب.ظ", "ب ظ", "بعدازظهر", "بعد از ظهر")
+_AM_MARKERS = ("am", "a.m", "a.m.", "ق.ظ", "ق ظ", "قبل‌ازظهر", "قبل از ظهر")
+
+
+def _normalize_clock_24h(value: str | None) -> str | None:
+    """Accept 24h or 12h (AM/PM / قبل‌ازظهر) clocks and return HH:MM."""
+
+    raw = str(value or "").translate(_DIGIT_TRANSLATION).strip()
+    if not raw:
+        return None
+    lowered = raw.lower().replace("٫", ":")
+    is_pm = any(marker in lowered for marker in _PM_MARKERS)
+    is_am = any(marker in lowered for marker in _AM_MARKERS)
+    stripped = re.sub(
+        r"(a\.?m\.?|p\.?m\.?|ق\.?\s*ظ\.?|ب\.?\s*ظ\.?|قبل‌?ازظهر|بعدازظهر|قبل از ظهر|بعد از ظهر)",
+        "",
+        lowered,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(r"[.\-]", ":", stripped)
+    stripped = re.sub(r"\s+", "", stripped)
+    match = re.fullmatch(r"(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?", stripped)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    second = int(match.group(3) or 0)
+    if is_pm and hour < 12:
+        hour += 12
+    if is_am and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59 or second > 59:
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _split_jalali_datetime(value: str) -> tuple[str, str | None]:
+    clean = re.sub(r"\s+", " ", str(value or "").translate(_DIGIT_TRANSLATION).strip())
+    if not clean:
+        return "", None
+    match = re.match(r"^(\d{4}[/-]\d{1,2}[/-]\d{1,2})(?:[ T]+(.+))?$", clean)
+    if not match:
+        return clean, None
+    return match.group(1), match.group(2)
+
+
+def _jalali_window_utc(
+    date_jalali: str | None,
+    clock: str | None,
+    timezone_name: str,
+    *,
+    end_of_day: bool,
+) -> str | None:
+    if not date_jalali:
+        return None
+    date_part, embedded_clock = _split_jalali_datetime(date_jalali)
+    resolved_clock = _normalize_clock_24h(clock) or _normalize_clock_24h(embedded_clock)
+    stamp = f"{date_part} {resolved_clock}" if resolved_clock else date_part
+    return _jalali_local_to_utc_iso(
+        stamp,
+        timezone_name,
+        end_of_day=end_of_day if not resolved_clock else True if end_of_day else False,
+    )
 
 
 def _jalali_local_to_utc_iso(value: str, timezone_name: str, *, end_of_day: bool = False) -> str:
     clean = str(value or "").translate(_DIGIT_TRANSLATION).strip()
     clean = re.sub(r"\s+", " ", clean)
+    date_part, clock_part = _split_jalali_datetime(clean)
+    normalized_clock = _normalize_clock_24h(clock_part)
+    if clock_part and not normalized_clock:
+        raise ValueError("ساعت باید ۲۴ساعته و مانند ۱۳:۳۰ باشد.")
+    if normalized_clock:
+        clean = f"{date_part} {normalized_clock}"
     match = re.fullmatch(
         r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?",
         clean,
@@ -324,6 +394,8 @@ def _jalali_local_to_utc_iso(value: str, timezone_name: str, *, end_of_day: bool
         hour = int(match.group(4))
         minute = int(match.group(5))
         second = int(match.group(6) or 0)
+        if end_of_day and match.group(6) is None:
+            second = 59
     if hour > 23 or minute > 59 or second > 59:
         raise ValueError("ساعت واردشده نامعتبر است.")
     try:
@@ -351,11 +423,9 @@ def _finalization_time_to_utc_iso(payload: EditorialFinalize) -> str | None:
             end_of_day=False,
         )
     if payload.finalized_date_jalali:
-        time_value = str(payload.finalized_time or "").translate(_DIGIT_TRANSLATION).strip()
+        time_value = _normalize_clock_24h(payload.finalized_time)
         if not time_value:
             raise ValueError("برای تاریخ نهایی‌سازی، ساعت و دقیقه را نیز وارد کنید.")
-        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?", time_value):
-            raise ValueError("ساعت نهایی‌سازی باید مانند 13:30 باشد.")
         return _jalali_local_to_utc_iso(
             f"{payload.finalized_date_jalali} {time_value}",
             payload.timezone,
@@ -376,8 +446,8 @@ def _finalization_time_to_utc_iso(payload: EditorialFinalize) -> str | None:
 
 def _automation_start_to_utc_iso(payload: AutomationStageStart) -> str:
     """Validate the required Jalali date/time boundary for one stage."""
-    time_value = str(payload.start_time or "").translate(_DIGIT_TRANSLATION).strip()
-    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?", time_value):
+    time_value = _normalize_clock_24h(payload.start_time)
+    if not time_value:
         raise ValueError("ساعت شروع باید مانند ۱۳:۳۰ وارد شود.")
     return _jalali_local_to_utc_iso(
         f"{payload.start_date_jalali} {time_value}",
@@ -978,26 +1048,20 @@ def create_dashboard_router(
         date_to: str | None = None,
         date_from_jalali: str | None = None,
         date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         limit: int = 500,
         offset: int = 0,
         _: str = Depends(admin_identity),
     ) -> dict[str, Any]:
         try:
             effective_from = (
-                _jalali_local_to_utc_iso(
-                    date_from_jalali,
-                    "Asia/Tehran",
-                    end_of_day=False,
-                )
+                _jalali_window_utc(date_from_jalali, time_from, "Asia/Tehran", end_of_day=False)
                 if date_from_jalali
                 else date_from
             )
             effective_to = (
-                _jalali_local_to_utc_iso(
-                    date_to_jalali,
-                    "Asia/Tehran",
-                    end_of_day=True,
-                )
+                _jalali_window_utc(date_to_jalali, time_to, "Asia/Tehran", end_of_day=True)
                 if date_to_jalali
                 else date_to
             )
@@ -1013,30 +1077,58 @@ def create_dashboard_router(
             offset=offset,
         )
 
+    @router.get("/admin/api/messages/ids")
+    async def message_ids(
+        status_value: str | None = Query(None, alias="status"),
+        source_chat_id: int | None = None,
+        q: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        date_from_jalali: str | None = None,
+        date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        try:
+            effective_from = (
+                _jalali_window_utc(date_from_jalali, time_from, "Asia/Tehran", end_of_day=False)
+                if date_from_jalali
+                else date_from
+            )
+            effective_to = (
+                _jalali_window_utc(date_to_jalali, time_to, "Asia/Tehran", end_of_day=True)
+                if date_to_jalali
+                else date_to
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return await db.list_message_ids_dashboard(
+            status=status_value,
+            source_chat_id=source_chat_id,
+            query=q,
+            date_from=effective_from,
+            date_to=effective_to,
+        )
+
     @router.get("/admin/api/messages/progress")
     async def message_window_progress(
         date_from: str | None = None,
         date_to: str | None = None,
         date_from_jalali: str | None = None,
         date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         _: str = Depends(admin_identity),
     ) -> dict[str, Any]:
         try:
             effective_from = (
-                _jalali_local_to_utc_iso(
-                    date_from_jalali,
-                    "Asia/Tehran",
-                    end_of_day=False,
-                )
+                _jalali_window_utc(date_from_jalali, time_from, "Asia/Tehran", end_of_day=False)
                 if date_from_jalali
                 else date_from
             )
             effective_to = (
-                _jalali_local_to_utc_iso(
-                    date_to_jalali,
-                    "Asia/Tehran",
-                    end_of_day=True,
-                )
+                _jalali_window_utc(date_to_jalali, time_to, "Asia/Tehran", end_of_day=True)
                 if date_to_jalali
                 else date_to
             )
@@ -1183,12 +1275,14 @@ def create_dashboard_router(
     async def analysis_filters(
         date_from_jalali: str | None = None,
         date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         timezone_name: str = Query("Asia/Tehran", alias="timezone"),
         _: str = Depends(admin_identity),
     ) -> dict[str, Any]:
         try:
-            date_from = _jalali_local_to_utc_iso(date_from_jalali, timezone_name, end_of_day=False) if date_from_jalali else None
-            date_to = _jalali_local_to_utc_iso(date_to_jalali, timezone_name, end_of_day=True) if date_to_jalali else None
+            date_from = _jalali_window_utc(date_from_jalali, time_from, timezone_name, end_of_day=False) if date_from_jalali else None
+            date_to = _jalali_window_utc(date_to_jalali, time_to, timezone_name, end_of_day=True) if date_to_jalali else None
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         return await db.analysis_filter_catalog(date_from=date_from, date_to=date_to)
@@ -1203,18 +1297,20 @@ def create_dashboard_router(
         date_to: str | None = None,
         date_from_jalali: str | None = None,
         date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         timezone_name: str = Query("Asia/Tehran", alias="timezone"),
         limit: int = 2000,
         _: str = Depends(admin_identity),
     ) -> list[dict[str, Any]]:
         try:
             effective_from = (
-                _jalali_local_to_utc_iso(date_from_jalali, timezone_name, end_of_day=False)
+                _jalali_window_utc(date_from_jalali, time_from, timezone_name, end_of_day=False)
                 if date_from_jalali
                 else date_from
             )
             effective_to = (
-                _jalali_local_to_utc_iso(date_to_jalali, timezone_name, end_of_day=True)
+                _jalali_window_utc(date_to_jalali, time_to, timezone_name, end_of_day=True)
                 if date_to_jalali
                 else date_to
             )
@@ -2288,7 +2384,7 @@ def create_dashboard_router(
             event_time = payload.event_time or source.get("analysis_event_time")
             oration_location = None
             title = payload.title or str(event_title)
-            category_name = payload.category_name or "رویدادهای مهم ایران و جهان"
+            category_name = payload.category_name or "وقایع و رویدادهای مهم ایران و جهان"
         else:
             matched_person = (
                 await db.find_person(payload.person_name)
@@ -2425,6 +2521,7 @@ def create_dashboard_router(
                 main_subject=payload.main_subject,
                 oration_location=payload.oration_location,
                 source_url=payload.source_url,
+                footnote=payload.footnote,
                 expected_version=payload.expected_version,
                 change_reason=payload.change_reason,
                 actor=actor,
@@ -2554,6 +2651,7 @@ def create_dashboard_router(
                     main_subject=draft.get("main_subject"),
                     oration_location=draft.get("oration_location"),
                     source_url=draft.get("source_url"),
+                    footnote=draft.get("footnote"),
                     expected_version=payload.expected_version,
                     change_reason=(
                         "تولید و ذخیره خودکار محتوا با مدل دوم"

@@ -38,19 +38,19 @@ const pageMeta = {
 const fa = new Intl.NumberFormat("fa-IR");
 const dateFormat = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
-  weekday: "long", hour: "2-digit", minute: "2-digit",
+  weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23",
 });
 const dateOnlyFormat = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit", weekday: "long",
 });
 const timeOnlyFormat = new Intl.DateTimeFormat("fa-IR", {
-  timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23",
 });
 const jalaliInputDateFormat = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
 });
 const timeInputFormat = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23",
 });
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -204,7 +204,7 @@ const jalaliValueToFlowDate = (value) => {
   const gregorian = d2g(j2d(parts.year, parts.month, parts.day));
   return `${gregorian.gy}-${String(gregorian.gm).padStart(2, "0")}-${String(gregorian.gd).padStart(2, "0")}`;
 };
-const latinDigits = (value) => String(value ?? "").replace(/[۰-۹]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹".indexOf(digit));
+const latinDigits = (value) => String(value ?? "").replace(/[۰-۹٠-٩]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩".indexOf(digit) % 10);
 
 function closeJalaliPicker() {
   const picker = $("jalaliPicker");
@@ -269,6 +269,112 @@ function bindJalaliDatePickers() {
         openJalaliPicker(input);
       });
     }
+  });
+}
+
+function clock24(value) {
+  let text = latinDigits(String(value || "")).trim().toLowerCase().replace(/[٫]/g, ":");
+  if (!text) return "";
+  const isPm = /p\.?\s*m\.?|ب\.?\s*ظ|بعدازظهر|بعد از ظهر/.test(text);
+  const isAm = /a\.?\s*m\.?|ق\.?\s*ظ|قبل‌?ازظهر|قبل از ظهر/.test(text);
+  text = text.replace(/a\.?\s*m\.?|p\.?\s*m\.?|ق\.?\s*ظ\.?|ب\.?\s*ظ\.?|قبل‌?ازظهر|بعدازظهر|قبل از ظهر|بعد از ظهر/g, "").trim();
+  text = text.replace(/[.\-]/g, ":").replace(/\s+/g, "");
+  const match = text.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
+  if (!match) return "";
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (isPm && hour < 12) hour += 12;
+  if (isAm && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function jalaliWindowParams(dateFromId, timeFromId, dateToId, timeToId) {
+  const params = new URLSearchParams();
+  const dateFrom = $(dateFromId)?.value.trim() || "";
+  const dateTo = $(dateToId)?.value.trim() || dateFrom;
+  const timeFrom = clock24($(timeFromId)?.value || "");
+  const timeTo = clock24($(timeToId)?.value || "");
+  if (dateFrom) params.set("date_from_jalali", dateFrom);
+  if (dateTo) params.set("date_to_jalali", dateTo);
+  if (timeFrom) params.set("time_from", timeFrom);
+  if (timeTo) params.set("time_to", timeTo);
+  params.set("timezone", "Asia/Tehran");
+  return params;
+}
+
+function bindTime24Pickers() {
+  const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  document.querySelectorAll('input[type="time"]').forEach((input) => {
+    if (input.dataset.time24Bound === "1") return;
+    input.dataset.time24Bound = "1";
+    const wrap = document.createElement("div");
+    wrap.className = "time24";
+    wrap.setAttribute("dir", "ltr");
+    const hour = document.createElement("select");
+    hour.className = "time24-hour";
+    hour.setAttribute("aria-label", "ساعت");
+    const minute = document.createElement("select");
+    minute.className = "time24-minute";
+    minute.setAttribute("aria-label", "دقیقه");
+    const sep = document.createElement("span");
+    sep.className = "time24-sep";
+    sep.textContent = ":";
+    const optional = !input.required && !input.value;
+    if (optional) {
+      hour.appendChild(new Option("ساعت", ""));
+      minute.appendChild(new Option("دقیقه", ""));
+    }
+    for (let h = 0; h < 24; h += 1) {
+      const value = String(h).padStart(2, "0");
+      hour.appendChild(new Option(value, value));
+    }
+    for (let m = 0; m < 60; m += 1) {
+      const value = String(m).padStart(2, "0");
+      minute.appendChild(new Option(value, value));
+    }
+    input.classList.add("time24-native");
+    input.setAttribute("step", "60");
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(hour);
+    wrap.appendChild(sep);
+    wrap.appendChild(minute);
+    wrap.appendChild(input);
+    const syncFromInput = () => {
+      const parsed = clock24(input.value);
+      if (!parsed) {
+        hour.value = optional ? "" : "00";
+        minute.value = optional ? "" : "00";
+        return;
+      }
+      const [hh, mm] = parsed.split(":");
+      hour.value = hh;
+      minute.value = mm;
+    };
+    const syncToInput = () => {
+      if (!hour.value && !minute.value) {
+        proto.set.call(input, "");
+      } else {
+        proto.set.call(input, `${hour.value || "00"}:${minute.value || "00"}`);
+      }
+      input.dispatchEvent(new Event("change", {bubbles: true}));
+      input.dispatchEvent(new Event("input", {bubbles: true}));
+    };
+    hour.addEventListener("change", syncToInput);
+    minute.addEventListener("change", syncToInput);
+    input.addEventListener("change", syncFromInput);
+    input.addEventListener("input", syncFromInput);
+    if (proto) {
+      Object.defineProperty(input, "value", {
+        configurable: true,
+        get() { return proto.get.call(this); },
+        set(next) {
+          proto.set.call(this, next);
+          syncFromInput();
+        },
+      });
+    }
+    syncFromInput();
   });
 }
 
@@ -513,9 +619,28 @@ function showPage(page, section = "") {
   const [title, subtitle] = pageMeta[page] || pageMeta.overview;
   $("pageTitle").textContent = title;
   $("pageSubtitle").textContent = subtitle;
-  $("sidebar").classList.remove("open");
+  closeMobileNav();
   history.replaceState(null, "", `#${page}${section ? `:${section}` : ""}`);
   loadPage(page).catch((error) => toast(error.message, true));
+}
+
+function closeMobileNav() {
+  $("sidebar")?.classList.remove("open");
+  const backdrop = $("navBackdrop");
+  if (backdrop) backdrop.hidden = true;
+  document.body.classList.remove("nav-open");
+}
+
+function openMobileNav() {
+  $("sidebar")?.classList.add("open");
+  const backdrop = $("navBackdrop");
+  if (backdrop) backdrop.hidden = false;
+  document.body.classList.add("nav-open");
+}
+
+function toggleMobileNav() {
+  if ($("sidebar")?.classList.contains("open")) closeMobileNav();
+  else openMobileNav();
 }
 
 function closeNavigationMenus() {
@@ -865,24 +990,17 @@ async function stopCrawlerFromDashboard() {
 
 async function loadStream({append = false} = {}) {
   if (!state.sources.length) await loadSources(true);
-  const pageSize = ($("streamFrom").value.trim() || $("streamTo").value.trim()) ? 500 : 150;
+  const pageSize = 200;
   if (!append) {
     state.streamOffset = 0;
     state.messages = [];
   }
-  const params = new URLSearchParams({limit: String(pageSize), offset: String(state.streamOffset)});
-  if ($("streamQuery").value.trim()) params.set("q", $("streamQuery").value.trim());
-  if ($("streamStatus").value) params.set("status", $("streamStatus").value);
-  if ($("streamSource").value) params.set("source_chat_id", $("streamSource").value);
-  if ($("streamFrom").value.trim()) params.set("date_from_jalali", $("streamFrom").value.trim());
-  if ($("streamTo").value.trim()) params.set("date_to_jalali", $("streamTo").value.trim());
+  const params = streamQueryParams({limit: String(pageSize), offset: String(state.streamOffset)});
   const data = await api(`/admin/api/messages?${params}`);
   const incoming = data.items || [];
   state.streamTotal = Number(data.total || 0);
   state.messages = append ? state.messages.concat(incoming) : incoming;
   state.streamOffset = state.messages.length;
-  const visibleIds = new Set(state.messages.map((item) => Number(item.id)).filter(Number.isFinite));
-  state.selectedMessages = new Set([...state.selectedMessages].filter((id) => visibleIds.has(Number(id))));
   $("streamCount").textContent = `${n(state.streamTotal)} پیام`;
   const moreBar = $("streamMoreBar");
   if (moreBar) {
@@ -894,11 +1012,20 @@ async function loadStream({append = false} = {}) {
   }
   renderMessages();
   updateStreamSelectionHint();
-  if (!append && ($("streamFrom").value.trim() || $("streamTo").value.trim())) {
-    while (state.messages.length < state.streamTotal && state.streamOffset < 5000) {
-      await loadStream({append: true});
-    }
-  }
+}
+
+function streamQueryParams(extra = {}) {
+  const params = new URLSearchParams(extra);
+  if ($("streamQuery")?.value.trim()) params.set("q", $("streamQuery").value.trim());
+  if ($("streamStatus")?.value) params.set("status", $("streamStatus").value);
+  if ($("streamSource")?.value) params.set("source_chat_id", $("streamSource").value);
+  if ($("streamFrom")?.value.trim()) params.set("date_from_jalali", $("streamFrom").value.trim());
+  if ($("streamTo")?.value.trim()) params.set("date_to_jalali", $("streamTo").value.trim());
+  const timeFrom = clock24($("streamTimeFrom")?.value || "");
+  const timeTo = clock24($("streamTimeTo")?.value || "");
+  if (timeFrom) params.set("time_from", timeFrom);
+  if (timeTo) params.set("time_to", timeTo);
+  return params;
 }
 
 function removeLegacyModerationControls(root = document) {
@@ -943,23 +1070,38 @@ function selectMessage(id, selected) {
 function updateStreamSelectionHint() {
   const count = state.selectedMessages.size;
   const visibleIds = state.messages.map((item) => Number(item.id)).filter(Number.isFinite);
-  const visibleSelected = visibleIds.filter((id) => state.selectedMessages.has(id)).length;
   $("streamSelectionHint").textContent = count
     ? `${n(count)} پیام برای تحلیل با مدل اول انتخاب شده است.`
     : "پیام‌های موردنظر را برای تحلیل با مدل اول انتخاب کنید.";
   const selectAll = $("selectVisibleMessages");
   const clear = $("clearMessageSelection");
-  selectAll.disabled = !visibleIds.length || visibleSelected === visibleIds.length;
+  const allMatchingSelected = count > 0 && count >= Number(state.streamTotal || 0) && Number(state.streamTotal || 0) > 0;
+  selectAll.disabled = !Number(state.streamTotal || visibleIds.length) || allMatchingSelected;
   selectAll.textContent = "انتخاب همه";
   clear.disabled = count === 0;
 }
 
-function selectVisibleMessages() {
-  state.selectedMessages = new Set(
-    state.messages.map((item) => Number(item.id)).filter(Number.isFinite)
-  );
-  renderMessages();
-  updateStreamSelectionHint();
+async function selectVisibleMessages() {
+  const button = $("selectVisibleMessages");
+  const oldText = button.textContent;
+  button.disabled = true;
+  button.textContent = "در حال انتخاب…";
+  try {
+    const result = await api(`/admin/api/messages/ids?${streamQueryParams()}`);
+    const ids = (result.ids || []).map((id) => Number(id)).filter(Number.isFinite);
+    state.selectedMessages = new Set(ids);
+    renderMessages();
+    updateStreamSelectionHint();
+    const total = Number(result.total || ids.length);
+    if (total > ids.length) {
+      toast(`${n(ids.length)} پیام از ${n(total)} پیام مطابق فیلتر انتخاب شد.`);
+    }
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = oldText;
+  }
 }
 
 function clearMessageSelection() {
@@ -976,19 +1118,30 @@ async function analyzeSelectedMessages() {
   button.disabled = true;
   button.textContent = "در حال تحلیل…";
   try {
-    const result = await api("/admin/api/messages/analyze", {
-      method: "POST",
-      body: JSON.stringify({message_ids: ids}),
-    });
+    const chunkSize = 200;
+    let succeeded = 0;
+    let failed = 0;
+    let parallelism = 0;
+    for (let index = 0; index < ids.length; index += chunkSize) {
+      const batch = ids.slice(index, index + chunkSize);
+      button.textContent = `در حال تحلیل ${n(index + 1)} تا ${n(Math.min(index + batch.length, ids.length))} از ${n(ids.length)}…`;
+      const result = await api("/admin/api/messages/analyze", {
+        method: "POST",
+        body: JSON.stringify({message_ids: batch}),
+      });
+      succeeded += Number(result.succeeded || 0);
+      failed += Number(result.failed || 0);
+      parallelism = Math.max(parallelism, Number(result.parallelism || 0));
+    }
     state.selectedMessages.clear();
     await loadStream();
-    const parallelNote = Number(result.parallelism || 0) > 1
-      ? ` با ${n(result.parallelism)} درخواست هم‌زمان`
+    const parallelNote = parallelism > 1
+      ? ` با ${n(parallelism)} درخواست هم‌زمان`
       : "";
-    const message = result.failed
-      ? `${n(result.succeeded)} پیام${parallelNote} تحلیل شد و ${n(result.failed)} پیام خطا داشت.`
-      : `تحلیل ${n(result.succeeded)} پیام${parallelNote} ذخیره شد و در نهایی‌سازی در دسترس است.`;
-    toast(message, Boolean(result.failed));
+    const message = failed
+      ? `${n(succeeded)} پیام${parallelNote} تحلیل شد و ${n(failed)} پیام خطا داشت.`
+      : `تحلیل ${n(succeeded)} پیام${parallelNote} ذخیره شد و در نهایی‌سازی در دسترس است.`;
+    toast(message, Boolean(failed));
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -1128,9 +1281,11 @@ function renderFinalizationView() {
     element.classList.toggle("hidden", element.id !== wanted);
   });
   if (wanted === "finalizationDeskView") {
-    const dateFrom = combineJalaliDateTime("finalizationDateFrom", "finalizationTimeFrom");
-    const dateTo = combineJalaliDateTime("finalizationDateTo", "finalizationTimeTo");
-    $("finalizationDeskHint").textContent = `بازهٔ فعال: ${dateFrom || "—"} تا ${dateTo || "—"}. فهرست زیر فقط از همین بازه ساخته شده است.`;
+    const dateFrom = $("finalizationDateFrom")?.value.trim() || "—";
+    const timeFrom = faDigits(clock24($("finalizationTimeFrom")?.value || "") || "00:00");
+    const dateTo = $("finalizationDateTo")?.value.trim() || dateFrom;
+    const timeTo = faDigits(clock24($("finalizationTimeTo")?.value || "") || "23:59");
+    $("finalizationDeskHint").textContent = `بازهٔ فعال: ${dateFrom} ${timeFrom} تا ${dateTo} ${timeTo}. فهرست زیر فقط از همین بازه ساخته شده است.`;
   }
 }
 
@@ -1169,10 +1324,10 @@ async function loadAnalysisFilters() {
   const previousEvent = $("finalizationEvent").value;
   const previousGeneral = $("finalizationGeneralTopic").value;
   const previousSpecific = $("finalizationSpecificTopic").value;
-  const dateFrom = combineJalaliDateTime("finalizationDateFrom", "finalizationTimeFrom");
-  const dateTo = combineJalaliDateTime("finalizationDateTo", "finalizationTimeTo");
+  const dateFrom = $("finalizationDateFrom").value.trim();
+  const dateTo = $("finalizationDateTo").value.trim() || dateFrom;
   if (!dateFrom || !dateTo) throw new Error("روز و ساعت شروع و پایان بازه را وارد کنید.");
-  const params = new URLSearchParams({date_from_jalali: dateFrom, date_to_jalali: dateTo, timezone: "Asia/Tehran"});
+  const params = jalaliWindowParams("finalizationDateFrom", "finalizationTimeFrom", "finalizationDateTo", "finalizationTimeTo");
   state.analysisFilters = await api(`/admin/api/analysis/filters?${params}`);
   $("finalizationSpeaker").innerHTML =
     `<option value="">ابتدا یک گوینده انتخاب کنید</option>`
@@ -1370,13 +1525,14 @@ function renderBulletinCandidate(draft = state.currentDraft) {
   const put = (id, value) => { $(id).textContent = value || "—"; };
   put("candidatePersonName", isEvent ? (event.title || draft?.event_title || draft?.title) : (person.name || draft?.person_name));
   put("candidatePersonPosition", isEvent ? "رویداد مستقل" : (person.position || draft?.position));
-  put("candidateCategory", isEvent ? "رویدادهای مهم ایران و جهان" : (fields.category_name || draft?.category_name || person.category));
+  put("candidateCategory", isEvent ? "وقایع و رویدادهای مهم ایران و جهان" : (fields.category_name || draft?.category_name || person.category));
   put("candidateGeneralTopic", generalTopics.join("، ") || topic.name || draft?.topic_name);
   put("candidateMainSubject", fields.main_subject || draft?.main_subject);
   put("candidateSpecificTopic", specificTopics.join("، "));
   put("candidateSummaryParagraph", fields.summary_paragraph || draft?.summary_paragraph);
   put("candidateSummarySentence", fields.summary_sentence || draft?.summary_sentence);
   put("candidateSummaryTitle", fields.detail || draft?.detail || fields.summary_title || draft?.summary_title);
+  put("candidateFootnote", fields.footnote || draft?.footnote);
   $("bulletinCandidateTitle").textContent = draft?.title || "خروجی آماده برای نهایی‌سازی";
   const status = draft?.status || "draft";
   $("bulletinCandidateStatus").textContent = statusLabel(status);
@@ -1394,7 +1550,8 @@ function refreshCurrentCandidatePreview() {
     summary_paragraph: $("summaryParagraph").value.trim(),
     summary_sentence: $("summarySentence").value.trim(),
     summary_title: $("summaryTitle").value.trim(), detail: $("summaryTitle").value.trim(),
-    bulletin_fields: {...(state.currentDraft.bulletin_fields || {}), main_subject: $("mainSubject").value.trim(), detail: $("summaryTitle").value.trim(), category_name: $("draftCategory").value.trim()},
+    footnote: $("deskFootnote")?.value.trim() || "",
+    bulletin_fields: {...(state.currentDraft.bulletin_fields || {}), main_subject: $("mainSubject").value.trim(), detail: $("summaryTitle").value.trim(), category_name: $("draftCategory").value.trim(), footnote: $("deskFootnote")?.value.trim() || ""},
   };
   renderBulletinCandidate(preview);
 }
@@ -1415,10 +1572,8 @@ async function loadAnalyzedMessages() {
   if (eventMessageId) params.set("event_message_id", String(eventMessageId));
   if ($("finalizationGeneralTopic").value) params.set("general_topic", $("finalizationGeneralTopic").value);
   if ($("finalizationSpecificTopic").value) params.set("specific_topic", $("finalizationSpecificTopic").value);
-  const dateFrom = combineJalaliDateTime("finalizationDateFrom", "finalizationTimeFrom");
-  const dateTo = combineJalaliDateTime("finalizationDateTo", "finalizationTimeTo");
-  if (dateFrom) params.set("date_from_jalali", dateFrom);
-  if (dateTo) params.set("date_to_jalali", dateTo);
+  const windowParams = jalaliWindowParams("finalizationDateFrom", "finalizationTimeFrom", "finalizationDateTo", "finalizationTimeTo");
+  windowParams.forEach((value, key) => params.set(key, value));
   const rows = await api(`/admin/api/analysis/messages?${params}`);
   state.analyzedMessages = groupAnalyzedMessages(rows);
   state.analyzedMessages.forEach((item) => state.messageSearchTexts.set(Number(item.id), String(item.text || item.caption || "").trim()));
@@ -1799,6 +1954,7 @@ async function openDraft(id) {
     $("summaryParagraph").value = draft.summary_paragraph || "";
     $("summarySentence").value = draft.summary_sentence || "";
     $("summaryTitle").value = draft.detail || draft.summary_title || "";
+    if ($("deskFootnote")) $("deskFootnote").value = draft.footnote || "";
     $("summaryBlockHeading").textContent = isEvent ? "خلاصه‌های رویداد" : "خلاصه‌های گوینده";
     $("summaryBlockHint").textContent = isEvent
       ? "مدل دوم، سه خلاصهٔ خبریِ رویداد مستقل را تولید می‌کند؛ سپس نتیجه را بازبینی کنید."
@@ -1867,6 +2023,7 @@ function draftPayload() {
     main_subject: $("mainSubject").value.trim() || null,
     oration_location: $("draftLocation").value.trim() || null,
     source_url: $("draftSourceUrl").value.trim() || null,
+    footnote: $("deskFootnote")?.value.trim() || null,
     change_reason: "ویرایش از میز تدوین",
   };
 }
@@ -2816,15 +2973,26 @@ function restoreQuickStart() {
 function qsWindowParams() {
   const dateFrom = state.quickStart.dateFrom;
   const dateTo = state.quickStart.dateTo || dateFrom;
-  const timeFrom = state.quickStart.timeFrom || "00:00";
-  const timeTo = state.quickStart.timeTo || "23:59";
+  const timeFrom = clock24(state.quickStart.timeFrom || "00:00") || "00:00";
+  const timeTo = clock24(state.quickStart.timeTo || "23:59") || "23:59";
   return {
     dateFrom,
     dateTo,
-    fromStamp: dateFrom ? `${dateFrom} ${timeFrom}` : "",
-    toStamp: dateTo ? `${dateTo} ${timeTo}` : "",
+    timeFrom,
+    timeTo,
     flowDate: jalaliValueToFlowDate(dateFrom),
   };
+}
+
+function qsWindowQuery() {
+  const {dateFrom, dateTo, timeFrom, timeTo} = qsWindowParams();
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("date_from_jalali", dateFrom);
+  if (dateTo) params.set("date_to_jalali", dateTo);
+  if (timeFrom) params.set("time_from", timeFrom);
+  if (timeTo) params.set("time_to", timeTo);
+  params.set("timezone", "Asia/Tehran");
+  return params;
 }
 
 function syncQuickStartWindowToSystem() {
@@ -2839,6 +3007,8 @@ function syncQuickStartWindowToSystem() {
   ["streamTo", "finalizationDateTo", "garayeTo", "qsDateTo"].forEach((id) => { if ($(id)) $(id).value = dateTo; });
   if ($("finalizationTimeFrom")) $("finalizationTimeFrom").value = timeFrom;
   if ($("finalizationTimeTo")) $("finalizationTimeTo").value = timeTo;
+  if ($("streamTimeFrom")) $("streamTimeFrom").value = timeFrom;
+  if ($("streamTimeTo")) $("streamTimeTo").value = timeTo;
   if ($("garayeFromTime")) $("garayeFromTime").value = timeFrom;
   if ($("garayeToTime")) $("garayeToTime").value = timeTo;
   if ($("garayeRangePreset")) $("garayeRangePreset").value = "custom";
@@ -2887,8 +3057,8 @@ async function confirmQuickStartWindow() {
   if (!parseJalaliInput(dateFrom)) return toast("روز تحلیل را از تقویم انتخاب کنید یا به‌صورت ۱۴۰۵/۰۵/۲۶ وارد کنید.", true);
   state.quickStart.dateFrom = dateFrom;
   state.quickStart.dateTo = $("qsDateTo").value.trim() || dateFrom;
-  state.quickStart.timeFrom = $("qsTimeFrom").value || "00:00";
-  state.quickStart.timeTo = $("qsTimeTo").value || "23:59";
+  state.quickStart.timeFrom = clock24($("qsTimeFrom").value || "00:00") || "00:00";
+  state.quickStart.timeTo = clock24($("qsTimeTo").value || "23:59") || "23:59";
   syncQuickStartWindowToSystem();
   persistQuickStart();
   setQuickStartStep(2);
@@ -2908,12 +3078,12 @@ function renderQuickStartProgress(progress) {
 }
 
 async function refreshQuickStartAnalysis() {
-  const {fromStamp, toStamp} = qsWindowParams();
-  if (!fromStamp) {
+  const {dateFrom} = qsWindowParams();
+  if (!dateFrom) {
     $("qsAnalysisProgress").innerHTML = `<small>ابتدا روز تحلیل را تأیید کنید.</small>`;
     return;
   }
-  const params = new URLSearchParams({date_from_jalali: fromStamp, date_to_jalali: toStamp});
+  const params = qsWindowQuery();
   const [progress, preview] = await Promise.all([
     api(`/admin/api/messages/progress?${params}`),
     api(`/admin/api/messages?${new URLSearchParams({...Object.fromEntries(params), limit: "12"})}`),
@@ -2926,8 +3096,7 @@ async function refreshQuickStartAnalysis() {
 }
 
 async function runQuickStartAnalysis() {
-  const {fromStamp, toStamp} = qsWindowParams();
-  const progress = await api(`/admin/api/messages/progress?${new URLSearchParams({date_from_jalali: fromStamp, date_to_jalali: toStamp})}`);
+  const progress = await api(`/admin/api/messages/progress?${qsWindowQuery()}`);
   const ids = progress.remaining_ids || [];
   if (!ids.length) {
     toast("خبر تحلیل‌نشده‌ای در این بازه باقی نمانده است.");
@@ -2960,11 +3129,11 @@ async function runQuickStartAnalysis() {
 }
 
 async function refreshQuickStartFinalization() {
-  const {fromStamp, toStamp} = qsWindowParams();
-  if (!fromStamp) return;
+  const {dateFrom} = qsWindowParams();
+  if (!dateFrom) return;
   syncQuickStartWindowToSystem();
   if (!state.people.length) await loadPeople();
-  const filters = await api(`/admin/api/analysis/filters?${new URLSearchParams({date_from_jalali: fromStamp, date_to_jalali: toStamp, timezone: "Asia/Tehran"})}`);
+  const filters = await api(`/admin/api/analysis/filters?${qsWindowQuery()}`);
   $("qsSpeaker").innerHTML = `<option value="">یک گوینده انتخاب کنید</option>` + (filters.speakers || []).map((item) => `<option value="${esc(item.speaker_name)}">${esc(item.speaker_name)} · ${n(item.message_count)}</option>`).join("");
   $("qsEvent").innerHTML = `<option value="">یک رویداد مستقل</option>` + (filters.events || []).map((item) => `<option value="${Number(item.message_id)}">${esc(item.event_title)}</option>`).join("");
   $("qsGeneralTopic").innerHTML = `<option value="">همه موضوعات کلی</option>` + (filters.general_topics || []).map((item) => `<option value="${esc(item.general_topic)}">${esc(item.general_topic)}</option>`).join("");
@@ -2989,8 +3158,7 @@ async function loadQuickStartAnalyzed() {
     $("qsCreateDraft").disabled = true;
     return;
   }
-  const {fromStamp, toStamp} = qsWindowParams();
-  const params = new URLSearchParams({date_from_jalali: fromStamp, date_to_jalali: toStamp});
+  const params = qsWindowQuery();
   if (speaker) params.set("speaker", speaker);
   if (eventMessageId) params.set("event_message_id", String(eventMessageId));
   if ($("qsGeneralTopic").value) params.set("general_topic", $("qsGeneralTopic").value);
@@ -3174,7 +3342,9 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   closeNavigationMenus();
 }));
 document.querySelectorAll("[data-go]").forEach((item) => item.addEventListener("click", () => showPage(item.dataset.go)));
-$("mobileMenu").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+$("mobileMenu").addEventListener("click", toggleMobileNav);
+$("closeNav")?.addEventListener("click", closeMobileNav);
+$("navBackdrop")?.addEventListener("click", closeMobileNav);
 $("backToPeople").addEventListener("click", () => showPage("people"));
 $("editProfilePerson").addEventListener("click", () => {
   if (!state.personProfileId) return;
@@ -3188,7 +3358,10 @@ $("logoutButton").addEventListener("click", async () => {
 $("refreshPage").addEventListener("click", () => loadPage(state.page).then(() => toast("اطلاعات تازه شد.")).catch((error) => toast(error.message, true)));
 $("calendarPrevious").addEventListener("click", () => moveCalendarMonth(-1));
 $("calendarNext").addEventListener("click", () => moveCalendarMonth(1));
-$("applyStreamFilters").addEventListener("click", () => loadStream().catch((error) => toast(error.message, true)));
+$("applyStreamFilters").addEventListener("click", () => {
+  state.selectedMessages.clear();
+  loadStream().catch((error) => toast(error.message, true));
+});
 $("streamQuery").addEventListener("keydown", (event) => { if (event.key === "Enter") loadStream(); });
 $("analyzeSelected").addEventListener("click", analyzeSelectedMessages);
 $("selectVisibleMessages").addEventListener("click", selectVisibleMessages);
@@ -3260,9 +3433,9 @@ $("deleteDraft").addEventListener("click", deleteCurrentDraft);
 $("generateBase").addEventListener("click", () => generateDraft("base"));
   $("generateAllSummaries").addEventListener("click", () => generateDraft("summaries"));
   $("createShortLink").addEventListener("click", createShortLink);
-  ["draftPerson", "draftCategory", "draftTopic", "summaryParagraph", "summarySentence", "summaryTitle"].forEach((id) => {
-    $(id).addEventListener("input", refreshCurrentCandidatePreview);
-    $(id).addEventListener("change", refreshCurrentCandidatePreview);
+  ["draftPerson", "draftCategory", "draftTopic", "summaryParagraph", "summarySentence", "summaryTitle", "deskFootnote"].forEach((id) => {
+    $(id)?.addEventListener("input", refreshCurrentCandidatePreview);
+    $(id)?.addEventListener("change", refreshCurrentCandidatePreview);
   });
   $("cancelQuickRegistryPerson").addEventListener("click", hideQuickRegistryPrompt);
   $("quickRegistryPersonForm").addEventListener("submit", async (event) => {
@@ -3640,6 +3813,7 @@ window.deleteBulletinRun = deleteBulletinRun;
     await loadSources(true);
     setGarayeRangePreset($("garayeRangePreset").value);
     bindJalaliDatePickers();
+    bindTime24Pickers();
     restoreQuickStart();
     const [hashPage, hashSection] = location.hash.replace("#", "").split(":", 2);
     showPage(pageMeta[hashPage] ? hashPage : "overview", hashSection || "");

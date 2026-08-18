@@ -2,17 +2,19 @@
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#008080">
   <title>سامانه خبرنامه گرایه</title>
-  <link rel="stylesheet" href="/admin/assets/app.css?v=11.33.0">
+  <link rel="stylesheet" href="/admin/assets/app.css?v=11.34.0">
 </head>
 <body>
   <div class="app-shell">
+    <div class="nav-backdrop" id="navBackdrop" hidden></div>
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <div class="brand-mark">گ</div>
         <div><strong>گرایه</strong><small>سامانه هوشمند خبرنامه</small></div>
+        <button type="button" class="icon-button sidebar-close" id="closeNav" aria-label="بستن منو">✕</button>
       </div>
       <button type="button" class="quick-start-nav" data-page="quick-start"><span>⚡</span><b>شروع سریع</b></button>
       <nav class="main-nav" aria-label="بخش‌های سامانه">
@@ -22,17 +24,6 @@
             <span class="nav-submenu-title">دیدبان</span>
             <button class="nav-item nav-sub-item" data-page="monitoring"><span>◫</span> نظارت</button>
             <button class="nav-item nav-sub-item" data-page="garaye"><span>✦</span> گرایه</button>
-          </div>
-        </details>
-        <details class="nav-disclosure nav-menu-group" id="settingsNav" aria-label="تنظیمات">
-          <summary><span>⚙</span><b>تنظیمات</b><i aria-hidden="true">‹</i></summary>
-          <div class="nav-submenu">
-            <span class="nav-submenu-title">تنظیمات</span>
-            <button class="nav-item nav-sub-item" data-page="automation"><span>↻</span> خودکارسازی</button>
-            <button class="nav-item nav-sub-item" data-page="sources"><span>⌁</span> منابع پایش</button>
-            <button class="nav-item nav-sub-item" data-page="portal"><span>♟</span> پرتال کاربری</button>
-            <button class="nav-item nav-sub-item" data-page="users" data-permission="users.manage"><span>♟</span> کاربران و دسترسی</button>
-            <button class="nav-item nav-sub-item" data-page="system"><span>⚙</span> وضعیت سامانه</button>
           </div>
         </details>
         <details class="nav-disclosure nav-menu-group" id="newsmakerNav" aria-label="خبرساز">
@@ -52,10 +43,21 @@
             <button class="nav-item nav-sub-item" data-page="people"><span>♙</span> شناسنامه اشخاص</button>
           </div>
         </details>
+        <details class="nav-disclosure nav-menu-group" id="settingsNav" aria-label="تنظیمات">
+          <summary><span>⚙</span><b>تنظیمات</b><i aria-hidden="true">‹</i></summary>
+          <div class="nav-submenu">
+            <span class="nav-submenu-title">تنظیمات</span>
+            <button class="nav-item nav-sub-item" data-page="automation"><span>↻</span> خودکارسازی</button>
+            <button class="nav-item nav-sub-item" data-page="sources"><span>⌁</span> منابع پایش</button>
+            <button class="nav-item nav-sub-item" data-page="portal"><span>♟</span> پرتال کاربری</button>
+            <button class="nav-item nav-sub-item" data-page="users" data-permission="users.manage"><span>♟</span> کاربران و دسترسی</button>
+            <button class="nav-item nav-sub-item" data-page="system"><span>⚙</span> وضعیت سامانه</button>
+          </div>
+        </details>
       </nav>
       <div class="sidebar-foot">
           <span class="live-dot"></span>
-        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۳.۰</span></small></div>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۴.۰</span></small></div>
       </div>
     </aside>
 
@@ -97,14 +99,40 @@
         </section>
 
         <section class="page" id="page-stream">
-          <div class="filter-panel">
-            <label class="search-field"><span>⌕</span><input id="streamQuery" placeholder="جست‌وجو در متن، شخص یا موضوع"></label>
-            <select id="streamStatus"><option value="">همه پیام‌ها</option><option value="pending">دریافت‌شده</option><option value="analyzed">تحلیل‌شده</option></select>
-            <select id="streamSource"><option value="">همه منابع</option></select>
-            <input id="streamFrom" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="از تاریخ؛ ۱۴۰۵/۰۵/۰۱" title="تاریخ جلالی از" autocomplete="off" data-jalali-date>
-            <input id="streamTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="تا تاریخ؛ ۱۴۰۵/۰۵/۳۱" title="تاریخ جلالی تا" autocomplete="off" data-jalali-date>
-            <button class="primary-button" id="applyStreamFilters">اعمال فیلتر</button>
-            <button class="outline-button analyze-button" id="analyzeSelected">✦ تحلیل کن</button>
+          <div class="stream-filters">
+            <div class="stream-filter-block">
+              <p class="stream-filter-label">جست‌وجو و منبع</p>
+              <div class="stream-filter-fields">
+                <label class="field search-field"><span>⌕</span><input id="streamQuery" placeholder="جست‌وجو در متن، شخص یا موضوع"></label>
+                <label class="field">وضعیت
+                  <select id="streamStatus"><option value="">همه پیام‌ها</option><option value="pending">دریافت‌شده</option><option value="analyzed">تحلیل‌شده</option></select>
+                </label>
+                <label class="field">منبع
+                  <select id="streamSource"><option value="">همه منابع</option></select>
+                </label>
+              </div>
+            </div>
+            <div class="stream-filter-block">
+              <p class="stream-filter-label">بازهٔ زمانی ۲۴ساعته</p>
+              <div class="stream-filter-fields stream-filter-window">
+                <label class="field">از تاریخ
+                  <input id="streamFrom" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۱" title="تاریخ جلالی از" autocomplete="off" data-jalali-date>
+                </label>
+                <label class="field">از ساعت
+                  <input id="streamTimeFrom" type="time" dir="ltr" step="60" title="ساعت شروع به‌صورت ۲۴ساعته">
+                </label>
+                <label class="field">تا تاریخ
+                  <input id="streamTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۳۱" title="تاریخ جلالی تا" autocomplete="off" data-jalali-date>
+                </label>
+                <label class="field">تا ساعت
+                  <input id="streamTimeTo" type="time" dir="ltr" step="60" title="ساعت پایان به‌صورت ۲۴ساعته">
+                </label>
+              </div>
+            </div>
+            <div class="stream-filter-actions">
+              <button class="primary-button" id="applyStreamFilters">اعمال فیلتر</button>
+              <button class="outline-button analyze-button" id="analyzeSelected">✦ تحلیل کن</button>
+            </div>
           </div>
           <div class="selection-bar">
             <div><b id="streamCount">۰ پیام</b><span id="streamSelectionHint">پیام‌های موردنظر را برای تحلیل با مدل اول انتخاب کنید.</span></div>
@@ -132,13 +160,27 @@
           <section class="qs-panel" id="qsStep1">
             <article class="panel">
               <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۱ از ۵</span><h3>انتخاب زمان تحلیل</h3><p>روزی را که اخبار آن باید تحلیل شود انتخاب کنید. همین بازه در جریان اخبار و میز تدوین هم اعمال می‌شود.</p></div></div>
-              <div class="form-grid two">
-                <label>روز تحلیل (جلالی)<input id="qsDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date></label>
-                <label>ساعت از<input id="qsTimeFrom" type="time" dir="ltr" step="60" value="00:00"></label>
-                <label>تا روز (اختیاری)<input id="qsDateTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="همان روز" autocomplete="off" data-jalali-date></label>
-                <label>ساعت تا<input id="qsTimeTo" type="time" dir="ltr" step="60" value="23:59"></label>
+              <div class="qs-window-grid">
+                <article class="qs-window-card">
+                  <header><span class="eyebrow">شروع بازه</span><h4>از تاریخ و ساعت</h4></header>
+                  <label class="field">روز (جلالی)
+                    <input id="qsDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date>
+                  </label>
+                  <label class="field">ساعت ۲۴ساعته
+                    <input id="qsTimeFrom" type="time" dir="ltr" step="60" value="00:00">
+                  </label>
+                </article>
+                <article class="qs-window-card">
+                  <header><span class="eyebrow">پایان بازه</span><h4>تا تاریخ و ساعت</h4></header>
+                  <label class="field">روز (اختیاری)
+                    <input id="qsDateTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="همان روز" autocomplete="off" data-jalali-date>
+                  </label>
+                  <label class="field">ساعت ۲۴ساعته
+                    <input id="qsTimeTo" type="time" dir="ltr" step="60" value="23:59">
+                  </label>
+                </article>
               </div>
-              <p class="qs-sync-note" id="qsWindowHint">با تأیید این مرحله، فیلتر تاریخ بخش‌های دیگر سامانه با همین بازه هم‌گام می‌شود.</p>
+              <p class="qs-sync-note" id="qsWindowHint">با تأیید این مرحله، فیلتر تاریخ و ساعت بخش‌های دیگر سامانه با همین بازه هم‌گام می‌شود.</p>
               <div class="button-row"><button type="button" class="primary-button" id="qsConfirmWindow">تأیید روز و رفتن به تحلیل</button></div>
             </article>
           </section>
@@ -407,6 +449,9 @@
                     <label>خلاصه یک‌خطی<textarea id="summarySentence" rows="3"></textarea></label>
                     <label>جزئیات موضع<textarea id="summaryTitle" rows="3" placeholder="مثلاً کاهش مالیات واحدهای تولیدی"></textarea></label>
                   </div>
+                  <label class="field footnote-field">پاورقی
+                    <textarea id="deskFootnote" rows="3" placeholder="اگر این خبر نیاز به توضیح پاورقی دارد، اینجا بنویسید. در صفحه‌آرایی به‌صورت پاورقی پایین صفحه می‌آید."></textarea>
+                  </label>
                 </div>
                 <section id="bulletinCandidatePreview" class="bulletin-candidate-preview" aria-live="polite" aria-labelledby="bulletinCandidateTitle">
                   <div class="candidate-preview-head">
@@ -426,6 +471,7 @@
                     <article><h4>خلاصه یک‌پاراگرافی</h4><p id="candidateSummaryParagraph">—</p></article>
                     <article><h4>خلاصه یک‌خطی</h4><p id="candidateSummarySentence">—</p></article>
                     <article><h4>جزئیات موضع</h4><p id="candidateSummaryTitle">—</p></article>
+                    <article><h4>پاورقی</h4><p id="candidateFootnote">—</p></article>
                   </div>
                 </section>
                 <details class="source-box" open><summary>پیام‌های مبنا <span id="inputCount"></span></summary><div id="draftInputs"></div></details>
@@ -705,7 +751,7 @@
     <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin/assets/wordcloud-layout.js?v=11.33.0" defer></script>
-  <script src="/admin/assets/app.js?v=11.33.0" defer></script>
+  <script src="/admin/assets/wordcloud-layout.js?v=11.34.0" defer></script>
+  <script src="/admin/assets/app.js?v=11.34.0" defer></script>
 </body>
 </html>

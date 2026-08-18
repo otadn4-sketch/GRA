@@ -937,6 +937,7 @@ CREATE TABLE IF NOT EXISTS bulletin_items (
     editorial_category TEXT,
     editorial_source_url TEXT,
     editorial_qr_code_path TEXT,
+    footnote TEXT,
     summary_method TEXT,
     summary_version TEXT,
     status TEXT NOT NULL DEFAULT 'review_pending',
@@ -1124,6 +1125,7 @@ CREATE TABLE IF NOT EXISTS editorial_drafts (
     source_url TEXT,
     short_url TEXT,
     qr_code_path TEXT,
+    footnote TEXT,
     event_title TEXT,
     event_entities_json TEXT,
     event_location TEXT,
@@ -1171,6 +1173,7 @@ CREATE TABLE IF NOT EXISTS editorial_draft_versions (
     topic_name TEXT,
     main_subject TEXT,
     detail TEXT,
+    footnote TEXT,
     change_reason TEXT,
     actor TEXT,
     created_at TEXT NOT NULL,
@@ -1414,6 +1417,7 @@ class Database:
                 "event_location": "TEXT",
                 "event_time": "TEXT",
                 "main_subject": "TEXT",
+                "footnote": "TEXT",
             }.items():
                 if column not in editorial_columns:
                     await conn.execute(f"ALTER TABLE editorial_drafts ADD COLUMN {column} {definition}")
@@ -1426,6 +1430,7 @@ class Database:
                 "topic_name": "TEXT",
                 "main_subject": "TEXT",
                 "detail": "TEXT",
+                "footnote": "TEXT",
             }.items():
                 if column not in version_columns:
                     await conn.execute(f"ALTER TABLE editorial_draft_versions ADD COLUMN {column} {definition}")
@@ -1439,6 +1444,7 @@ class Database:
                 "editorial_category": "TEXT",
                 "editorial_source_url": "TEXT",
                 "editorial_qr_code_path": "TEXT",
+                "footnote": "TEXT",
             }.items():
                 if column not in bulletin_item_columns:
                     await conn.execute(
@@ -2804,6 +2810,66 @@ class Database:
         await self.attach_sender_profile_displays(items)
         return {"total": int((total_row or {}).get("c") or 0), "items": items}
 
+    async def list_message_ids_dashboard(
+        self,
+        *,
+        status: str | None = None,
+        source_chat_id: int | None = None,
+        query: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 20000,
+    ) -> dict[str, Any]:
+        where = ["1=1"]
+        params: list[Any] = []
+        if status == "analyzed":
+            where.append(
+                """(m.ai_enrichment_status='validated' OR EXISTS (
+                    SELECT 1 FROM message_speaker_tags analyzed
+                    WHERE analyzed.message_id=m.id
+                ))"""
+            )
+        elif status:
+            where.append("m.status=?")
+            params.append(status)
+        if source_chat_id is not None:
+            where.append("m.source_chat_id=?")
+            params.append(source_chat_id)
+        if query:
+            where.append(
+                """(m.normalized_text LIKE ? OR m.sender_name LIKE ?
+                OR m.sender_chat_title LIKE ? OR m.sender_chat_username LIKE ?
+                OR m.forwarded_origin_title LIKE ? OR m.detected_person_name LIKE ?
+                OR m.detected_topic_name LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM message_speaker_tags st
+                    WHERE st.message_id=m.id AND (
+                        st.speaker_name LIKE ? OR st.specific_topic LIKE ?
+                        OR st.general_topic LIKE ?
+                    )
+                ))"""
+            )
+            token = f"%{normalize_persian(query)}%"
+            params.extend([token] * 10)
+        _append_message_window(where, params, date_from, date_to)
+        clause = " AND ".join(where)
+        total_row = await self._fetchone(
+            f"SELECT COUNT(*) AS c FROM messages m WHERE {clause}", params
+        )
+        rows = await self._fetchall(
+            f"""
+            SELECT m.id FROM messages m
+            WHERE {clause}
+            ORDER BY COALESCE(m.published_at,m.received_at) DESC, m.id DESC
+            LIMIT ?
+            """,
+            [*params, max(1, min(int(limit), 20000))],
+        )
+        return {
+            "total": int((total_row or {}).get("c") or 0),
+            "ids": [int(row["id"]) for row in rows],
+        }
+
     def _analyzed_message_sql(self) -> str:
         return """(m.ai_enrichment_status='validated' OR EXISTS (
                     SELECT 1 FROM message_speaker_tags analyzed
@@ -2833,7 +2899,7 @@ class Database:
             SELECT m.id FROM messages m
             WHERE {clause} AND NOT {analyzed_sql}
             ORDER BY COALESCE(m.published_at,m.received_at) DESC, m.id DESC
-            LIMIT 5000
+            LIMIT 20000
             """,
             params,
         )
@@ -6115,11 +6181,11 @@ class Database:
                       run_id,person_id,person_candidate_id,person_name,position,category,registry_bucket,
                       topic_id,topic_name,main_subject,statement_type,statement_location_type,statement_location_label,
                       summary,summary_detailed,edited_summary,detail,editorial_category,editorial_source_url,editorial_qr_code_path,
-                      summary_method,summary_version,status,
+                      footnote,summary_method,summary_version,status,
                       confidence,confidence_breakdown_json,consensus_method,selected_sentences_json,
                       pipeline_versions_json,importance_score,include_in_main,include_in_appendix,
                       editorial_order,review_reason,issue_tags_json,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         run_id,
@@ -6142,6 +6208,7 @@ class Database:
                         item.get("editorial_category"),
                         item.get("editorial_source_url"),
                         item.get("editorial_qr_code_path"),
+                        item.get("footnote"),
                         item.get("summary_method") or "extractive",
                         item.get("summary_version") or "v11.0",
                         item.get("status") or "review_pending",
@@ -7341,6 +7408,7 @@ class Database:
             "category_name": draft.get("category_name") or (person or {}).get("category"),
             "oration_location": draft.get("oration_location"),
             "source_url": draft.get("source_url"),
+            "footnote": draft.get("footnote"),
             "finalized_at": draft.get("finalized_at"),
             "event": draft["event"],
             "analysis_topics": analysis_topics,
@@ -7367,6 +7435,7 @@ class Database:
         main_subject: str | None = None,
         oration_location: str | None = None,
         source_url: str | None = None,
+        footnote: str | None = None,
         expected_version: int,
         change_reason: str,
         actor: str,
@@ -7397,7 +7466,7 @@ class Database:
                 UPDATE editorial_drafts SET title=COALESCE(?,title),base_text=?,summary_paragraph=?,summary_sentence=?,
                 summary_title=?,detail=?,category_name=COALESCE(?,category_name),person_id=COALESCE(?,person_id),person_name=COALESCE(?,person_name),
                 topic_id=COALESCE(?,topic_id),topic_name=COALESCE(?,topic_name),main_subject=COALESCE(?,main_subject),
-                oration_location=COALESCE(?,oration_location),source_url=COALESCE(?,source_url),
+                oration_location=COALESCE(?,oration_location),source_url=COALESCE(?,source_url),footnote=?,
                 current_version=?,status='draft',updated_at=? WHERE draft_id=? AND current_version=? AND status='draft'
                 """,
                 (
@@ -7415,6 +7484,7 @@ class Database:
                     main_subject,
                     oration_location,
                     source_url,
+                    footnote,
                     version_no,
                     now,
                     draft_id,
@@ -7429,9 +7499,9 @@ class Database:
             await conn.execute(
                 """
                 INSERT INTO editorial_draft_versions(
-                  draft_id,version_no,base_text,summary_paragraph,summary_sentence,summary_title,category_name,topic_name,main_subject,detail,
+                  draft_id,version_no,base_text,summary_paragraph,summary_sentence,summary_title,category_name,topic_name,main_subject,detail,footnote,
                   change_reason,actor,created_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     draft_id,
@@ -7444,6 +7514,7 @@ class Database:
                     topic_name,
                     main_subject,
                     detail or summary_title,
+                    footnote,
                     change_reason,
                     actor,
                     now,
@@ -7479,6 +7550,7 @@ class Database:
             category_name=version.get("category_name"),
             topic_name=version.get("topic_name"),
             main_subject=version.get("main_subject"),
+            footnote=version.get("footnote"),
             expected_version=expected_version,
             change_reason=f"بازگشت به نسخه {version['version_no']}",
             actor=actor,
@@ -7868,11 +7940,11 @@ class Database:
                     # دستهٔ فهرست اشخاص فقط از شناسنامه می‌آید؛ رویدادها بخش
                     # پایانی مستقل «رویدادهای مهم ایران و جهان» هستند.
                     "category": (
-                        "رویدادهای مهم ایران و جهان"
+                        "وقایع و رویدادهای مهم ایران و جهان"
                         if is_event
-                        else ((person or {}).get("category") or draft.get("category_name") or "سایر افراد")
+                        else ((person or {}).get("category") or draft.get("category_name") or "سایر مسئولان و سیاسیون")
                     ),
-                    "editorial_category": draft.get("category_name") or (person or {}).get("category") or ("رویدادهای مهم ایران و جهان" if is_event else "سایر"),
+                    "editorial_category": draft.get("category_name") or (person or {}).get("category") or ("وقایع و رویدادهای مهم ایران و جهان" if is_event else "سایر مسئولان و سیاسیون"),
                     "registry_bucket": "inside" if draft.get("person_id") else "outside",
                     "topic_id": draft.get("topic_id"),
                     "topic_name": draft.get("topic_name") or "سایر",
@@ -7883,6 +7955,7 @@ class Database:
                     "summary_detailed": draft.get("summary_paragraph") or draft.get("base_text"),
                     "edited_summary": draft.get("summary_sentence") or draft.get("summary_paragraph"),
                     "detail": draft.get("detail") or draft.get("summary_title"),
+                    "footnote": draft.get("footnote"),
                     # QR is published only when this editorial-desk link and
                     # its generated QR file travel together into the run.
                     "editorial_source_url": draft.get("source_url"),
