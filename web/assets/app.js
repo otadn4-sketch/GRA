@@ -591,10 +591,10 @@ function toast(message, isError = false) {
 }
 
 function showPage(page, section = "") {
+  const leavingQuickStart = state.page === "quick-start" && page !== "quick-start";
   if (page === "finalization") {
     state.finalizationView = section === "drafts" ? "drafts" : "workbench";
     section = state.finalizationView;
-    renderFinalizationView();
   }
   if (page === "person-profile") {
     const personId = Number(section);
@@ -606,6 +606,8 @@ function showPage(page, section = "") {
   }
   state.page = page;
   state.pageSection = section;
+  if (leavingQuickStart) unmountQuickStartDesk();
+  if (page === "finalization") renderFinalizationView();
   document.querySelectorAll(".page").forEach((element) => element.classList.toggle("active", element.id === `page-${page}`));
   document.querySelectorAll(".nav-item, .quick-start-nav").forEach((element) => element.classList.toggle(
     "active", (element.dataset.page === page || (page === "person-profile" && element.dataset.page === "people") || (page === "portal" && element.dataset.page === "portal"))
@@ -1272,6 +1274,12 @@ async function loadFinalizationWorkspace() {
 }
 
 function renderFinalizationView() {
+  if (isQuickStartWorkspace()) {
+    $("finalizationRangeView")?.classList.add("hidden");
+    $("finalizationDeskView")?.classList.remove("hidden");
+    $("finalizationDrafts")?.classList.remove("hidden");
+    return;
+  }
   const wanted = state.finalizationView === "drafts"
     ? "finalizationDrafts"
     : (state.finalizationStage === "desk" && state.finalizationWindowConfirmed
@@ -1741,15 +1749,19 @@ async function createDraftFromAnalysis(options = {}) {
         message_inputs: messageInputs,
       }),
     });
-    state.finalizationView = "drafts";
-    renderFinalizationView();
-    history.replaceState(null, "", "#finalization:drafts");
     await loadDrafts();
     await openDraft(data.draft_id);
     requestAnimationFrame(() => {
       $("draftEditor")?.scrollIntoView({behavior: "smooth", block: "start"});
       $("generateAllSummaries")?.focus({preventScroll: true});
     });
+    if (keepQuickStartLocation()) {
+      renderFinalizationView();
+    } else {
+      state.finalizationView = "drafts";
+      renderFinalizationView();
+      history.replaceState(null, "", "#finalization:drafts");
+    }
     toast(isEvent
       ? "رویداد در انتهای صفحه باز شد. خلاصه‌ها فقط با دکمهٔ «تولید سه خلاصهٔ رویداد» ساخته می‌شوند."
       : "امکانات تدوین در انتهای صفحه باز شد. تا وقتی «تولید هر سه خلاصه» را نزنید، خلاصه‌ای تولید نمی‌شود.");
@@ -1780,12 +1792,16 @@ async function createManualDraft() {
       }),
     });
     state.selectedAnalyzedMessages.clear();
-    state.finalizationView = "drafts";
-    renderFinalizationView();
-    history.replaceState(null, "", "#finalization:drafts");
     await loadDrafts();
     await openDraft(data.draft_id);
     requestAnimationFrame(() => $("draftTitle")?.focus({preventScroll: true}));
+    if (keepQuickStartLocation()) {
+      renderFinalizationView();
+    } else {
+      state.finalizationView = "drafts";
+      renderFinalizationView();
+      history.replaceState(null, "", "#finalization:drafts");
+    }
     toast("خبر دستیِ مستقل ساخته شد؛ هیچ پیام یا متن پایه‌ای از پیش‌نویس‌های قبلی در آن وارد نشده است.");
   } catch (error) {
     toast(error.message, true);
@@ -2158,7 +2174,9 @@ async function finalizeDraft() {
     state.finalizationView = "workbench";
     state.finalizationStage = "desk";
     renderFinalizationView();
-    history.replaceState(null, "", "#finalization:workbench");
+    if (!keepQuickStartLocation()) {
+      history.replaceState(null, "", "#finalization:workbench");
+    }
   } catch (error) { toast(error.message, true); }
 }
 
@@ -2968,6 +2986,74 @@ function emptyQuickStartState() {
   };
 }
 
+function isQuickStartWorkspace() {
+  return state.page === "quick-start";
+}
+
+function keepQuickStartLocation() {
+  if (!isQuickStartWorkspace()) return false;
+  history.replaceState(null, "", "#quick-start");
+  return true;
+}
+
+function restoreEmbeddedDeskCopy() {
+  const eyebrow = $("finalizationDeskView")?.querySelector(".eyebrow");
+  if (eyebrow?.dataset.original) eyebrow.textContent = eyebrow.dataset.original;
+  const draftsEyebrow = $("finalizationDrafts")?.querySelector(".eyebrow");
+  if (draftsEyebrow?.dataset.original) draftsEyebrow.textContent = draftsEyebrow.dataset.original;
+}
+
+function mountQuickStartDesk() {
+  const host = $("qsDeskHost");
+  const desk = $("finalizationDeskView");
+  const drafts = $("finalizationDrafts");
+  if (!host || !desk || !drafts) return;
+  if (!state.qsDeskHomes) {
+    state.qsDeskHomes = {
+      deskParent: desk.parentNode,
+      deskNext: desk.nextSibling,
+      draftsParent: drafts.parentNode,
+      draftsNext: drafts.nextSibling,
+    };
+  }
+  if (desk.parentNode !== host) host.append(desk, drafts);
+  desk.classList.remove("hidden");
+  drafts.classList.remove("hidden");
+  $("finalizationRangeView")?.classList.add("hidden");
+  const deskEyebrow = desk.querySelector(".eyebrow");
+  if (deskEyebrow) {
+    deskEyebrow.dataset.original = deskEyebrow.dataset.original || deskEyebrow.textContent;
+    deskEyebrow.textContent = "شروع سریع · میز تدوین";
+  }
+  const draftsEyebrow = drafts.querySelector(".eyebrow");
+  if (draftsEyebrow) {
+    draftsEyebrow.dataset.original = draftsEyebrow.dataset.original || draftsEyebrow.textContent;
+    draftsEyebrow.textContent = "شروع سریع · پیش‌نویس و نهایی‌سازی";
+  }
+}
+
+function unmountQuickStartDesk() {
+  const homes = state.qsDeskHomes;
+  const desk = $("finalizationDeskView");
+  const drafts = $("finalizationDrafts");
+  if (!homes || !desk || desk.parentNode === homes.deskParent) {
+    restoreEmbeddedDeskCopy();
+    return;
+  }
+  if (homes.deskNext && homes.deskNext.parentNode === homes.deskParent) {
+    homes.deskParent.insertBefore(desk, homes.deskNext);
+  } else {
+    homes.deskParent.appendChild(desk);
+  }
+  if (homes.draftsNext && homes.draftsNext.parentNode === homes.draftsParent) {
+    homes.draftsParent.insertBefore(drafts, homes.draftsNext);
+  } else {
+    homes.draftsParent.appendChild(drafts);
+  }
+  restoreEmbeddedDeskCopy();
+  if (state.page === "finalization") renderFinalizationView();
+}
+
 function persistQuickStart() {
   try { localStorage.setItem("garaye:quick-start", JSON.stringify(state.quickStart)); } catch (_) {}
 }
@@ -3064,6 +3150,7 @@ function setQuickStartStep(step) {
   for (let index = 1; index <= 5; index += 1) {
     $(`qsStep${index}`)?.classList.toggle("hidden", index !== state.quickStart.step);
   }
+  if (state.quickStart.step !== 3) unmountQuickStartDesk();
 }
 
 async function loadQuickStart() {
@@ -3086,7 +3173,8 @@ async function loadQuickStart() {
       setQuickStartStep(3);
     }
   }
-  if (state.quickStart.step >= 3) await refreshQuickStartFinalization();
+  if (state.quickStart.step === 3) await refreshQuickStartFinalization();
+  else unmountQuickStartDesk();
   if (state.quickStart.step >= 4) await refreshQuickStartHighAttention({fillDays: true});
   if (state.quickStart.step >= 5) await refreshQuickStartOutput({fillDays: true});
 }
@@ -3221,97 +3309,10 @@ async function refreshQuickStartFinalization() {
   const {dateFrom} = qsWindowParams();
   if (!dateFrom) return;
   syncQuickStartWindowToSystem();
-  if (!state.people.length) await loadPeople();
-  const filters = await api(`/admin/api/analysis/filters?${qsWindowQuery()}`);
-  $("qsSpeaker").innerHTML = `<option value="">یک گوینده انتخاب کنید</option>` + (filters.speakers || []).map((item) => `<option value="${esc(item.speaker_name)}">${esc(item.speaker_name)} · ${n(item.message_count)}</option>`).join("");
-  $("qsEvent").innerHTML = `<option value="">یک رویداد مستقل</option>` + (filters.events || []).map((item) => `<option value="${Number(item.message_id)}">${esc(item.event_title)}</option>`).join("");
-  $("qsGeneralTopic").innerHTML = `<option value="">همه موضوعات کلی</option>` + (filters.general_topics || []).map((item) => `<option value="${esc(item.general_topic)}">${esc(item.general_topic)}</option>`).join("");
-  $("qsSpecificTopic").innerHTML = `<option value="">همه موضوعات مشخص</option>` + (filters.specific_topics || []).map((item) => `<option value="${esc(item.specific_topic)}">${esc(item.specific_topic)}</option>`).join("");
-  const progress = filters.progress || {};
-  const panel = $("qsFinalizationProgress");
-  const totalUnits = Number(progress.total_people || 0) + Number(progress.total_events || 0);
-  const remainingUnits = Number(progress.remaining_people || 0) + Number(progress.remaining_events || 0);
-  const percent = totalUnits ? Math.round((totalUnits - remainingUnits) / totalUnits * 100) : 100;
-  panel.classList.remove("hidden");
-  panel.innerHTML = `<div class="finalization-progress-copy"><span class="eyebrow">پیشرفت نهایی‌سازی</span><b>${n(percent)}٪ تکمیل شده</b><small>${n(progress.remaining_people || 0)} گوینده و ${n(progress.remaining_events || 0)} رویداد باقی مانده است.</small></div><div class="finalization-progress-track"><i style="width:${percent}%"></i></div>`;
-  await loadQuickStartAnalyzed();
-  await loadQuickStartDrafts();
-}
-
-async function loadQuickStartAnalyzed() {
-  const speaker = $("qsSpeaker").value;
-  const eventMessageId = Number($("qsEvent").value) || null;
-  if (!speaker && !eventMessageId) {
-    $("qsAnalyzedList").innerHTML = `<div class="empty-mini">یک گوینده یا رویداد را انتخاب کنید.</div>`;
-    $("qsAnalyzedCount").textContent = "۰ خبر";
-    $("qsCreateDraft").disabled = true;
-    return;
-  }
-  const params = qsWindowQuery();
-  if (speaker) params.set("speaker", speaker);
-  if (eventMessageId) params.set("event_message_id", String(eventMessageId));
-  if ($("qsGeneralTopic").value) params.set("general_topic", $("qsGeneralTopic").value);
-  if ($("qsSpecificTopic").value) params.set("specific_topic", $("qsSpecificTopic").value);
-  const rows = groupAnalyzedMessages(await api(`/admin/api/analysis/messages?${params}`));
-  state.analyzedMessages = rows;
-  state.selectedAnalyzedMessages = new Set(rows.map((item) => Number(item.id)));
-  $("qsAnalyzedCount").textContent = `${n(rows.length)} خبر`;
-  $("qsCreateDraft").disabled = !rows.length;
-  $("qsAnalyzedList").innerHTML = rows.length ? rows.map((item) => `
-    <article class="analyzed-card selected">
-      <div><h4>${esc(item.source_chat_title || item.analysis_event_title || `پیام ${item.id}`)}</h4><span class="analysis-date">${esc(fdate(item.published_at || item.received_at))}</span></div>
-      <p>${esc((item.text || item.caption || "").slice(0, 280))}</p>
-    </article>`).join("") : `<div class="empty-mini">خبر تحلیل‌شده‌ای برای این انتخاب نیست.</div>`;
-}
-
-async function loadQuickStartDrafts() {
-  const drafts = await api("/admin/api/editorial-drafts");
-  const {flowDate, dateFrom} = qsWindowParams();
-  const filtered = drafts.filter((item) => {
-    if (flowDate && String(item.flow_date || "") === flowDate) return true;
-    const stamp = jalaliInputDate(item.finalized_at || item.updated_at);
-    return stamp === dateFrom;
-  });
-  $("qsDraftList").innerHTML = filtered.length ? filtered.map((item) => `
-    <article class="draft-item">
-      <div><span class="status-pill ${esc(item.status)}">${statusLabel(item.status)}</span></div>
-      <h4>${esc(item.title || item.person_name || `پیش‌نویس ${item.draft_id}`)}</h4>
-      <p>${esc(item.summary_sentence || item.topic_name || "")}</p>
-      <div class="button-row">
-        ${item.status === "draft" ? `<button type="button" class="primary-button" onclick="quickFinalizeDraft(${item.draft_id})">نهایی‌سازی سریع</button>` : ""}
-        <button type="button" class="text-button" onclick="showPage('finalization','drafts');openDraft(${item.draft_id})">ویرایش کامل</button>
-      </div>
-    </article>`).join("") : `<div class="empty-mini">هنوز پیش‌نویسی برای این بازه نیست.</div>`;
-}
-
-async function createQuickStartDraft() {
-  syncQuickStartWindowToSystem();
-  if (!state.people.length) await loadPeople();
-  state.finalizationWindowConfirmed = true;
-  $("finalizationSpeaker").value = $("qsSpeaker").value;
-  $("finalizationEvent").value = $("qsEvent").value;
-  if ($("finalizationGeneralTopic")) $("finalizationGeneralTopic").value = $("qsGeneralTopic").value;
-  if ($("finalizationSpecificTopic")) $("finalizationSpecificTopic").value = $("qsSpecificTopic").value;
-  await createDraftFromAnalysis();
-  await loadQuickStartDrafts();
-  await refreshQuickStartFinalization();
-}
-
-async function quickFinalizeDraft(draftId) {
-  const {dateFrom} = qsWindowParams();
-  const now = tehranTimeInput(new Date().toISOString()) || "12:00";
-  try {
-    await api(`/admin/api/editorial-drafts/${draftId}/finalize`, {
-      method: "POST",
-      body: JSON.stringify({
-        finalized_date_jalali: dateFrom,
-        finalized_time: now,
-        timezone: "Asia/Tehran",
-      }),
-    });
-    toast("خبر نهایی شد و برای پربازتاب و خبرنامه آماده است.");
-    await loadQuickStartDrafts();
-  } catch (error) { toast(error.message, true); }
+  mountQuickStartDesk();
+  if (!state.people.length || !state.topics.length) await loadReferenceData();
+  await loadAnalysisFilters();
+  await loadDrafts();
 }
 
 async function fillQsFinalizationDaySelect(selectId, selectedDay) {
@@ -3350,9 +3351,8 @@ async function refreshQuickStartHighAttention({fillDays = false} = {}) {
     const days = await fillQsFinalizationDaySelect("qsHighAttentionDay", selectedDay);
     $("qsHighAttentionDayHint").textContent = days.length
       ? `${n(days.length)} روز دارای خبر نهایی برای بررسی پربازتاب در دسترس است.`
-      : "روز را از تقویم انتخاب کنید یا ابتدا خبر را نهایی کنید.";
+      : "ابتدا خبر را نهایی کنید تا روز آن اینجا بیاید.";
   }
-  syncJalaliFlowInput("qsHighAttentionJalaliDate", selectedDay);
   const toolbar = $("qsHighAttentionToolbar");
   const selectAll = $("qsSelectAllHighAttention");
   state.currentHighAttention = null;
@@ -3462,10 +3462,9 @@ async function refreshQuickStartOutput({fillDays = false} = {}) {
   if (fillDays) {
     const days = await fillQsFinalizationDaySelect("qsOutputDay", selectedDay);
     $("qsOutputDayHint").textContent = days.length
-      ? "برای نمایش خبرهای نهایی‌شدهٔ یک روز، روز را از فهرست یا تقویم انتخاب کنید؛ خروجی فقط از خبرهایی ساخته می‌شود که خودتان تیک زده‌اید."
-      : "روز را از تقویم انتخاب کنید یا ابتدا خبر را نهایی کنید.";
+      ? "خروجی فقط از خبرهایی ساخته می‌شود که خودتان تیک زده‌اید."
+      : "ابتدا خبر را نهایی کنید تا روز آن اینجا بیاید.";
   }
-  syncJalaliFlowInput("qsOutputJalaliDate", selectedDay);
   const toolbar = $("qsOutputToolbar");
   if (!selectedDay) {
     toolbar?.classList.add("hidden");
@@ -3578,6 +3577,7 @@ $("refreshHumanControl").addEventListener("click", () => loadHumanControl().catc
 $("refreshAnalysisFilters").addEventListener("click", () => loadAnalysisFilters().catch((error) => toast(error.message, true)));
 $("applyFinalizationWindow").addEventListener("click", () => loadAnalysisFilters().catch((error) => toast(error.message, true)));
 $("changeFinalizationRange").addEventListener("click", () => {
+  if (isQuickStartWorkspace()) return;
   state.finalizationStage = "range";
   renderFinalizationView();
   $("finalizationDateFrom").focus();
@@ -3889,32 +3889,8 @@ $("qsGoHighAttention")?.addEventListener("click", () => {
   setQuickStartStep(4);
   refreshQuickStartHighAttention({fillDays: true}).catch((error) => toast(error.message, true));
 });
-$("qsOpenFullDesk")?.addEventListener("click", () => { syncQuickStartWindowToSystem(); showPage("finalization", "workbench"); });
-$("qsCreateDraft")?.addEventListener("click", () => createQuickStartDraft().catch((error) => toast(error.message, true)));
-["qsSpeaker", "qsEvent", "qsGeneralTopic", "qsSpecificTopic"].forEach((id) => {
-  $(id)?.addEventListener("change", () => {
-    if (id === "qsSpeaker" && $("qsSpeaker").value) $("qsEvent").value = "";
-    if (id === "qsEvent" && $("qsEvent").value) $("qsSpeaker").value = "";
-    loadQuickStartAnalyzed().catch((error) => toast(error.message, true));
-  });
-});
 $("qsHighAttentionDay")?.addEventListener("change", () => {
   state.quickStart.highAttentionDay = $("qsHighAttentionDay").value;
-  persistQuickStart();
-  refreshQuickStartHighAttention().catch((error) => toast(error.message, true));
-});
-$("qsHighAttentionJalaliDate")?.addEventListener("change", () => {
-  const raw = $("qsHighAttentionJalaliDate").value.trim();
-  if (!raw) {
-    state.quickStart.highAttentionDay = "";
-    if ($("qsHighAttentionDay")) $("qsHighAttentionDay").value = "";
-    persistQuickStart();
-    refreshQuickStartHighAttention().catch((error) => toast(error.message, true));
-    return;
-  }
-  const flowDate = applyJalaliFlowDay(raw, {selectId: "qsHighAttentionDay"});
-  if (!flowDate) return;
-  state.quickStart.highAttentionDay = flowDate;
   persistQuickStart();
   refreshQuickStartHighAttention().catch((error) => toast(error.message, true));
 });
@@ -3943,21 +3919,6 @@ $("qsOutputDay")?.addEventListener("change", () => {
   persistQuickStart();
   refreshQuickStartOutput().catch((error) => toast(error.message, true));
 });
-$("qsOutputJalaliDate")?.addEventListener("change", () => {
-  const raw = $("qsOutputJalaliDate").value.trim();
-  if (!raw) {
-    state.quickStart.outputDay = "";
-    if ($("qsOutputDay")) $("qsOutputDay").value = "";
-    persistQuickStart();
-    refreshQuickStartOutput().catch((error) => toast(error.message, true));
-    return;
-  }
-  const flowDate = applyJalaliFlowDay(raw, {selectId: "qsOutputDay"});
-  if (!flowDate) return;
-  state.quickStart.outputDay = flowDate;
-  persistQuickStart();
-  refreshQuickStartOutput().catch((error) => toast(error.message, true));
-});
 $("qsSelectAllBulletin")?.addEventListener("change", (event) => {
   document.querySelectorAll(".qs-bulletin-check").forEach((input) => { input.checked = event.currentTarget.checked; });
   updateQuickStartOutputActions();
@@ -3983,8 +3944,6 @@ $("resetQuickStart")?.addEventListener("click", () => {
   if ($("qsDateTo")) $("qsDateTo").value = "";
   if ($("qsHighAttentionDay")) $("qsHighAttentionDay").value = "";
   if ($("qsOutputDay")) $("qsOutputDay").value = "";
-  syncJalaliFlowInput("qsHighAttentionJalaliDate", "");
-  syncJalaliFlowInput("qsOutputJalaliDate", "");
   renderQuickStartHighAttentionEditor(null);
   setQuickStartStep(1);
 });
@@ -4078,7 +4037,6 @@ window.updateBulletinPreview = updateBulletinPreview; window.updateHighAttention
 window.openHighAttentionRun = openHighAttentionRun; window.editPerson = editPerson;
 window.editAdminUser = editAdminUser;
 window.showMonitoringDayShare = showMonitoringDayShare;
-window.quickFinalizeDraft = quickFinalizeDraft;
 window.viewAdminUserProfile = viewAdminUserProfile;
 window.regenerateBulletinOutputs = regenerateBulletinOutputs;
 window.deleteBulletinRun = deleteBulletinRun;

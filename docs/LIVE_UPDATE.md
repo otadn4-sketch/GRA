@@ -1,4 +1,4 @@
-# به‌روزرسانی زنده سامانه گرایه (نسخه ۱۱.۳۶.۰)
+# به‌روزرسانی زنده سامانه گرایه (نسخه ۱۱.۳۷.۰)
 
 از این نسخه لازم نیست برای اعمال فایل‌های جدید، هر بار سامانه را دستی متوقف کنید. بسته ZIP را از داخل داشبورد آپلود می‌کنید؛ فایل‌های برنامه جایگزین می‌شوند و اگر سرویس با حالت نظارت‌شده اجرا شده باشد، خودش با نسخه جدید برمی‌گردد.
 
@@ -52,7 +52,7 @@ deploy\register-task.ps1
 نمونه در ویندوز، از ریشه پروژه:
 
 ```powershell
-Compress-Archive -Path app,web,deploy,VERSION,requirements.txt -DestinationPath garaye-11.36.0.zip
+Compress-Archive -Path app,web,deploy,VERSION,requirements.txt -DestinationPath garaye-11.37.0.zip
 ```
 
 حداکثر حجم بسته ۸۰ مگابایت است. `.env`، `.venv`، `data`، `backups` و فایل‌های `.db` داخل ZIP نادیده گرفته می‌شوند.
@@ -73,7 +73,7 @@ Compress-Archive -Path app,web,deploy,VERSION,requirements.txt -DestinationPath 
 اگر به داشبورد دسترسی ندارید ولی سرویس نظارت‌شده در حال اجرا است:
 
 ```powershell
-deploy\apply-update.ps1 -ZipPath C:\path\garaye-11.36.0.zip
+deploy\apply-update.ps1 -ZipPath C:\path\garaye-11.37.0.zip
 ```
 
 ## اگر بعد از آپلود سامانه بالا نیامد

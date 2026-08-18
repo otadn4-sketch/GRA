@@ -336,5 +336,40 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
   .message-card{min-height:0}
   .page-wrap{padding:12px}
   .topbar h1{font-size:18px}
+  .qs-picker-card,.qs-picker-controls,.qs-output-meta,.qs-output-split,.qs-output-box-head{grid-template-columns:1fr}
+  .qs-picker-controls .primary-button{width:100%}
+}
+
+/* v11.37 — QS embeds the full desk; prettier HA/output pickers. */
+.qs-finalization-hero{margin-bottom:14px}
+.qs-desk-host{display:grid;gap:16px;margin-bottom:16px}
+.qs-desk-host .finalization-view{max-width:none;margin:0;animation:none}
+.qs-desk-host .drafts-panel{position:static;max-height:none}
+.qs-desk-host #createDraftFromAnalysis,.qs-desk-host #changeFinalizationRange{display:none!important}
+.qs-desk-host .analysis-filter-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.qs-step-nav{margin-top:8px}
+.qs-picker-card{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.9fr);gap:16px;align-items:end;padding:18px;margin-bottom:16px;border:1px solid rgba(0,128,128,.22);border-radius:18px;background:linear-gradient(160deg,#fff,#edf8f6)}
+.qs-picker-copy h4{margin:2px 0 4px;color:#003738;font-size:16px}
+.qs-picker-copy p{margin:0;color:var(--muted);font-size:12px;line-height:1.8}
+.qs-picker-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
+.qs-picker-select{margin:0}
+.qs-picker-select select{min-height:44px;border:1px solid rgba(0,78,79,.22);border-radius:11px;background:#fff;padding:9px 11px}
+.qs-picker-controls .primary-button{white-space:nowrap;min-height:44px}
+.qs-output-meta{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(180px,.6fr);gap:12px;margin-bottom:14px}
+.qs-output-field{margin:0;padding:14px;border:1px solid rgba(0,128,128,.18);border-radius:16px;background:#fff}
+.qs-output-intro{grid-column:1/-1}
+.qs-output-field input,.qs-output-field select,.qs-output-field textarea{width:100%;min-height:44px;margin-top:6px;border:1px solid rgba(0,78,79,.22);border-radius:11px;background:#fbfefd;padding:9px 11px}
+.qs-output-field textarea{min-height:96px;resize:vertical}
+.qs-output-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:16px}
+.qs-output-box{padding:16px;border:1px solid rgba(0,128,128,.18);border-radius:18px;background:linear-gradient(180deg,#fff,#f6fbfa)}
+.qs-output-box-head{display:grid;gap:8px;margin-bottom:12px}
+.qs-output-box-head h4{margin:2px 0 0;color:#003738}
+.qs-output-box .sortable-list{margin-bottom:0;min-height:120px}
+.qs-output-runs{margin:4px 0 14px}
+@media(max-width:1050px){
+  .qs-picker-card,.qs-output-split,.qs-desk-host .analysis-filter-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:850px){
+  .qs-picker-card,.qs-picker-controls,.qs-output-meta,.qs-output-split,.qs-desk-host .analysis-filter-grid{grid-template-columns:1fr}
 }
 
