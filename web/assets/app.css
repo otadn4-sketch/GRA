@@ -287,6 +287,7 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 
 /* v11.34 — 24h clocks, stream filters, quick-start window, footnotes, mobile nav. */
 /* v11.35 — quick-start auto analysis, finalization-day pickers for HA/output. */
+/* v11.36 — quick-start remaining_ids SQL for unanalyzed NULL status. */
 .brand{display:flex;align-items:center;gap:12px}
 .sidebar-close{display:none;margin-right:auto;width:38px;height:38px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;border-radius:11px}
 .nav-backdrop{display:none}

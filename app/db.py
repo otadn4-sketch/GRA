@@ -2741,12 +2741,9 @@ class Database:
         if status == "analyzed":
             # Analysis is a workflow state layered on top of the source-review
             # status, so it must not be compared to ``messages.status``.
-            where.append(
-                """(m.ai_enrichment_status='validated' OR EXISTS (
-                    SELECT 1 FROM message_speaker_tags analyzed
-                    WHERE analyzed.message_id=m.id
-                ))"""
-            )
+            where.append(self._analyzed_message_sql())
+        elif status == "unanalyzed":
+            where.append(self._unanalyzed_message_sql())
         elif status:
             where.append("m.status=?")
             params.append(status)
@@ -2823,12 +2820,9 @@ class Database:
         where = ["1=1"]
         params: list[Any] = []
         if status == "analyzed":
-            where.append(
-                """(m.ai_enrichment_status='validated' OR EXISTS (
-                    SELECT 1 FROM message_speaker_tags analyzed
-                    WHERE analyzed.message_id=m.id
-                ))"""
-            )
+            where.append(self._analyzed_message_sql())
+        elif status == "unanalyzed":
+            where.append(self._unanalyzed_message_sql())
         elif status:
             where.append("m.status=?")
             params.append(status)
@@ -2871,7 +2865,16 @@ class Database:
         }
 
     def _analyzed_message_sql(self) -> str:
-        return """(m.ai_enrichment_status='validated' OR EXISTS (
+        # IFNULL is required: SQLite treats ``NULL = 'validated'`` as NULL, so
+        # ``NOT (status='validated' OR EXISTS(...))`` drops unanalyzed rows
+        # instead of returning their ids.
+        return """(IFNULL(m.ai_enrichment_status,'')='validated' OR EXISTS (
+                    SELECT 1 FROM message_speaker_tags analyzed
+                    WHERE analyzed.message_id=m.id
+                ))"""
+
+    def _unanalyzed_message_sql(self) -> str:
+        return """(IFNULL(m.ai_enrichment_status,'')<>'validated' AND NOT EXISTS (
                     SELECT 1 FROM message_speaker_tags analyzed
                     WHERE analyzed.message_id=m.id
                 ))"""
@@ -2884,6 +2887,7 @@ class Database:
         _append_message_window(where, params, date_from, date_to)
         clause = " AND ".join(where)
         analyzed_sql = self._analyzed_message_sql()
+        unanalyzed_sql = self._unanalyzed_message_sql()
         total_row = await self._fetchone(
             f"SELECT COUNT(*) AS c FROM messages m WHERE {clause}", params
         )
@@ -2891,13 +2895,17 @@ class Database:
             f"SELECT COUNT(*) AS c FROM messages m WHERE {clause} AND {analyzed_sql}",
             params,
         )
+        remaining_row = await self._fetchone(
+            f"SELECT COUNT(*) AS c FROM messages m WHERE {clause} AND {unanalyzed_sql}",
+            params,
+        )
         total = int((total_row or {}).get("c") or 0)
         analyzed = int((analyzed_row or {}).get("c") or 0)
-        remaining = max(0, total - analyzed)
+        remaining = int((remaining_row or {}).get("c") or 0)
         remaining_ids = await self._fetchall(
             f"""
             SELECT m.id FROM messages m
-            WHERE {clause} AND NOT {analyzed_sql}
+            WHERE {clause} AND {unanalyzed_sql}
             ORDER BY COALESCE(m.published_at,m.received_at) DESC, m.id DESC
             LIMIT 20000
             """,

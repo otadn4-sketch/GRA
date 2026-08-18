@@ -3139,6 +3139,23 @@ async function refreshQuickStartAnalysis() {
   return progress;
 }
 
+async function qsUnanalyzedMessageIds(progress) {
+  const fromProgress = (Array.isArray(progress?.remaining_ids) ? progress.remaining_ids : [])
+    .map(Number)
+    .filter((id) => id > 0);
+  if (fromProgress.length) return fromProgress;
+  const unanalyzedQuery = qsWindowQuery();
+  unanalyzedQuery.set("status", "unanalyzed");
+  try {
+    const listed = await api(`/admin/api/messages/ids?${unanalyzedQuery}`);
+    const ids = (listed.ids || []).map(Number).filter((id) => id > 0);
+    if (ids.length) return ids;
+  } catch (_) {}
+  if (!Number(progress?.remaining || 0)) return [];
+  const fallback = await api(`/admin/api/messages/ids?${qsWindowQuery()}`);
+  return (fallback.ids || []).map(Number).filter((id) => id > 0);
+}
+
 async function runQuickStartAnalysis({autoAdvance = true} = {}) {
   if (qsAnalysisInFlight) return;
   if (!qsWindowParams().dateFrom) {
@@ -3156,8 +3173,8 @@ async function runQuickStartAnalysis({autoAdvance = true} = {}) {
       const progress = await api(`/admin/api/messages/progress?${qsWindowQuery()}`);
       renderQuickStartProgress(progress, {running: true});
       const remaining = Number(progress.remaining || 0);
-      const ids = progress.remaining_ids || [];
-      if (!remaining) {
+      const ids = await qsUnanalyzedMessageIds(progress);
+      if (!remaining && !ids.length) {
         state.quickStart.analysisDone = true;
         persistQuickStart();
         renderQuickStartProgress(progress, {running: false});
@@ -3169,12 +3186,12 @@ async function runQuickStartAnalysis({autoAdvance = true} = {}) {
         return;
       }
       if (!ids.length) {
-        toast("شناسه اخبار باقی‌مانده دریافت نشد؛ این مرحله را دوباره انتخاب کنید.", true);
+        toast("در این بازه خبری برای تحلیل یافت نشد.", true);
         return;
       }
-      if (remaining >= lastRemaining) stallCount += 1;
+      if (remaining && remaining >= lastRemaining) stallCount += 1;
       else stallCount = 0;
-      lastRemaining = remaining;
+      lastRemaining = remaining || ids.length;
       if (stallCount >= 2) {
         toast("تحلیل متوقف شد؛ این مرحله را دوباره انتخاب کنید تا ادامه یابد.", true);
         return;
@@ -3183,9 +3200,9 @@ async function runQuickStartAnalysis({autoAdvance = true} = {}) {
         const batch = ids.slice(index, index + 200);
         await api("/admin/api/messages/analyze", {method: "POST", body: JSON.stringify({message_ids: batch})});
         renderQuickStartProgress({
-          total: progress.total,
+          total: progress.total || ids.length,
           analyzed: Number(progress.analyzed || 0) + index + batch.length,
-          remaining: Math.max(0, remaining - index - batch.length),
+          remaining: Math.max(0, (remaining || ids.length) - index - batch.length),
         }, {running: true});
       }
     }
