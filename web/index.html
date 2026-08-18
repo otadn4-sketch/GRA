@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#008080">
   <title>سامانه خبرنامه گرایه</title>
-  <link rel="stylesheet" href="/admin/assets/app.css?v=11.34.0">
+  <link rel="stylesheet" href="/admin/assets/app.css?v=11.35.0">
 </head>
 <body>
   <div class="app-shell">
@@ -57,7 +57,7 @@
       </nav>
       <div class="sidebar-foot">
           <span class="live-dot"></span>
-        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۴.۰</span></small></div>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۵.۰</span></small></div>
       </div>
     </aside>
 
@@ -187,14 +187,11 @@
 
           <section class="qs-panel hidden" id="qsStep2">
             <article class="panel">
-              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۲ از ۵</span><h3>تحلیل اخبار</h3><p>اخبار همین بازه از دیتابیس خوانده می‌شود و تحلیل مدل اول به‌صورت دسته‌ای با نوار پیشرفت اجرا می‌گردد.</p></div></div>
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۲ از ۵</span><h3>تحلیل اخبار</h3><p>پس از تأیید بازه، اخبار همین بازه به‌صورت خودکار با موتور اول تحلیل می‌شوند. پس از اتمام تحلیل، مرحلهٔ نهایی‌سازی باز می‌شود.</p></div></div>
               <div id="qsAnalysisProgress" class="qs-progress" aria-live="polite"></div>
               <div class="button-row">
-                <button type="button" class="ghost-button" id="qsBackToWindow">بازگشت</button>
-                <button type="button" class="primary-button" id="qsRunAnalysis">شروع تحلیل اخبار باقی‌مانده</button>
-                <button type="button" class="outline-button" id="qsSkipToFinalization">رفتن به نهایی‌سازی</button>
+                <button type="button" class="ghost-button" id="qsBackToWindow">بازگشت به انتخاب زمان</button>
               </div>
-              <div id="qsStreamPreview" class="qs-preview-list"></div>
             </article>
           </section>
 
@@ -227,12 +224,17 @@
 
           <section class="qs-panel hidden" id="qsStep4">
             <article class="panel">
-              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۴ از ۵</span><h3>پربازتاب</h3><p>خبرهای نهایی همین روز را انتخاب و محورهای پربازتاب را تولید کنید. نتیجه با بخش پربازتاب سامانه یکی است.</p></div></div>
-              <div class="bulletin-drafts-toolbar" id="qsHighAttentionToolbar">
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۴ از ۵</span><h3>پربازتاب</h3><p>ابتدا روزی را که خبرها در آن نهایی شده‌اند انتخاب کنید، سپس خبرهای همان روز را برگزینید و محورهای پربازتاب را بسازید.</p></div></div>
+              <div class="bulletin-day-picker">
+                <label>روز نهایی‌سازی خبرها<select id="qsHighAttentionDay"><option value="">انتخاب روز نهایی‌سازی</option></select></label>
+                <label>انتخاب تقویمی روز<input id="qsHighAttentionJalaliDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date></label>
+                <p id="qsHighAttentionDayHint">روز را از فهرست خبرهای نهایی یا از تقویم انتخاب کنید؛ تایپ دستی تاریخ جلالی هم پذیرفته می‌شود.</p>
+              </div>
+              <div class="bulletin-drafts-toolbar hidden" id="qsHighAttentionToolbar">
                 <label class="select-all-label"><input id="qsSelectAllHighAttention" type="checkbox"> انتخاب همه خبرهای این روز</label>
                 <span id="qsHighAttentionHint">خبرهای نهایی همین روز</span>
               </div>
-              <div id="qsHighAttentionDrafts" class="sortable-list"><div class="empty-mini">ابتدا روز را تأیید و خبر را نهایی کنید.</div></div>
+              <div id="qsHighAttentionDrafts" class="sortable-list"><div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div></div>
               <button type="button" class="primary-button" id="qsGenerateHighAttention" disabled>تولید پربازتاب</button>
               <div id="qsHighAttentionEditor" class="high-attention-editor hidden">
                 <div id="qsHighAttentionItems" class="high-attention-items"></div>
@@ -250,15 +252,27 @@
 
           <section class="qs-panel hidden" id="qsStep5">
             <article class="panel">
-              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۵ از ۵</span><h3>خروجی‌سازی خبرنامه</h3><p>خبرهای نهایی و پربازتاب همین روز را برای ساخت خروجی HTML، Word و PDF انتخاب کنید.</p></div></div>
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۵ از ۵</span><h3>خروجی‌سازی خبرنامه</h3><p>ابتدا روز نهایی‌سازی را انتخاب کنید، سپس خبرهای نهایی و پربازتاب همان روز را برای ساخت خروجی HTML، Word و PDF برگزینید.</p></div></div>
               <div class="form-grid two bulletin-meta-fields">
                 <label>عنوان خبرنامه<input id="qsBulletinTitle" value="خبرنامه گرایه"></label>
                 <label>نوع گزارش<select id="qsBulletinMode"><option value="concise">کوتاه</option><option value="full">کامل</option></select></label>
                 <label class="full">مقدمه<textarea id="qsBulletinIntroduction" rows="4" maxlength="8000" placeholder="در صورت خالی‌بودن، صفحهٔ مقدمه ساخته نمی‌شود."></textarea></label>
               </div>
-              <div id="qsBulletinDrafts" class="sortable-list bulletin-drafts-scroll"><div class="empty-mini">خبر نهایی این روز را انتخاب کنید.</div></div>
-              <div id="qsBulletinHighAttention" class="sortable-list"><div class="empty-mini">پربازتاب نهایی این روز اینجا می‌آید.</div></div>
-              <button type="button" class="primary-button wide" id="qsCreateBulletin">ساخت و آماده‌سازی خروجی</button>
+              <div class="bulletin-day-picker">
+                <label>مبنای انتخاب خبرها<select id="qsOutputDay"><option value="">انتخاب روز نهایی‌سازی</option></select></label>
+                <label>انتخاب تقویمی روز<input id="qsOutputJalaliDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date></label>
+                <p id="qsOutputDayHint">روز را از فهرست یا تقویم انتخاب کنید؛ خروجی فقط از خبرهایی ساخته می‌شود که خودتان تیک زده‌اید.</p>
+              </div>
+              <div class="bulletin-drafts-toolbar hidden" id="qsOutputToolbar">
+                <label class="select-all-label"><input id="qsSelectAllBulletin" type="checkbox"> انتخاب همه</label>
+                <span id="qsOutputHint">خبرهای نهایی همین روز</span>
+              </div>
+              <div id="qsBulletinDrafts" class="sortable-list bulletin-drafts-scroll"><div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div></div>
+              <section class="bulletin-high-attention-picker" aria-labelledby="qsBulletinHighAttentionTitle">
+                <div class="block-head"><div><h4 id="qsBulletinHighAttentionTitle">پربازتاب‌های نهایی</h4><p>محورهای پربازتاب نهایی‌شدهٔ همین روز را برای درج در بخش پربازتاب بولتن انتخاب کنید.</p></div></div>
+                <div id="qsBulletinHighAttention" class="sortable-list"><div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div></div>
+              </section>
+              <button type="button" class="primary-button wide" id="qsCreateBulletin" disabled>ساخت و آماده‌سازی خروجی</button>
               <div id="qsBulletinRuns" class="table-wrap"></div>
               <div class="button-row"><button type="button" class="ghost-button" id="qsBackToHighAttention">بازگشت</button><button type="button" class="outline-button" id="qsOpenBulletins">باز کردن بخش خبرنامه</button></div>
             </article>
@@ -751,7 +765,7 @@
     <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin/assets/wordcloud-layout.js?v=11.34.0" defer></script>
-  <script src="/admin/assets/app.js?v=11.34.0" defer></script>
+  <script src="/admin/assets/wordcloud-layout.js?v=11.35.0" defer></script>
+  <script src="/admin/assets/app.js?v=11.35.0" defer></script>
 </body>
 </html>
