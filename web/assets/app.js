@@ -1203,7 +1203,6 @@ function renderEitanMessages() {
   if (!grid) return;
   const items = state.eitanMessages || [];
   grid.innerHTML = items.length ? items.map((item) => {
-    const text = item.text || item.caption || "[پیام رسانه‌ای]";
     const sender = senderLabel(item);
     const analysisComplete = item.ai_enrichment_status === "validated" || Boolean((item.speaker_tags || []).length);
     const timestamp = fdateParts(item.published_at || item.received_at || item.created_at);
@@ -1215,7 +1214,7 @@ function renderEitanMessages() {
     return `<article class="message-card ${analysisComplete ? "analysis-complete" : ""}"${analysisComplete ? ' data-analysis-state="complete"' : ""}>
       <div class="message-head"><div class="message-source"><span class="source-avatar">${esc((item.source_chat_title || "خ").slice(0, 1))}</span><b>${esc(item.source_chat_title || item.source_chat_username || "منبع")}</b></div></div>
       <div><span class="status-pill ${esc(item.status)}">${statusLabel(item.status)}</span>${analysisComplete ? `<span class="analysis-status-tag">تحلیل‌شده</span>` : ""} ${analysisTags || (item.detected_person_name ? `<span class="status-pill">${esc(item.detected_person_name)}</span>` : "")}</div>
-      <div class="message-text">${esc(text)}</div>
+      ${messageCardBody(item)}
       <div class="trace-meta"><span>👤 ارسال‌کننده/کارشناس: <b>${esc(sender)}</b></span><span>📍 مبدأ فوروارد: <b>${esc(origin)}</b></span></div>
       <div class="message-meta"><span class="message-timestamp"><span>${esc(timestamp.date)}</span><time datetime="${esc(timestamp.raw)}">${esc(timestamp.time)}</time></span><span>${n(item.media_count)} رسانه · ${n(item.link_count)} لینک</span></div>
       <div class="message-actions"><button class="detail-btn" onclick="openMessage(${item.id})">جزئیات</button></div>
@@ -1460,9 +1459,61 @@ function removeLegacyModerationControls(root = document) {
   ).forEach((button) => button.remove());
 }
 
+function formatMediaDuration(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return `${faDigits(minutes)}:${faDigits(String(rest).padStart(2, "0"))}`;
+}
+
+function messageMediaItems(item) {
+  return Array.isArray(item?.media_items) ? item.media_items : [];
+}
+
+function renderMessageMedia(item) {
+  const assets = messageMediaItems(item);
+  if (!assets.length) return "";
+  const kindLabel = (kind) => ({
+    photo: "تصویر",
+    video: "ویدیو",
+    animation: "ویدیو",
+    video_note: "ویدیو",
+    audio: "صوت",
+    voice: "پیام صوتی",
+    sticker: "استیکر",
+    document: "فایل",
+  })[kind] || "رسانه";
+  return `<div class="message-media">${assets.map((asset) => {
+    const label = kindLabel(asset.kind);
+    if (asset.too_large || !asset.url) {
+      return `<div class="message-media-note">«${esc(label)}» بزرگ‌تر از سقف ۲۰ مگابایت بله است و پخش نمی‌شود.</div>`;
+    }
+    if (asset.play === "image") {
+      return `<a class="message-media-photo" href="${esc(asset.url)}" target="_blank" rel="noopener"><img src="${esc(asset.url)}" alt="${esc(asset.file_name || label)}" loading="lazy"></a>`;
+    }
+    if (asset.play === "video") {
+      return `<video class="message-media-video" controls preload="none" playsinline src="${esc(asset.url)}"></video>`;
+    }
+    if (asset.play === "audio") {
+      const duration = formatMediaDuration(asset.duration);
+      return `<div class="message-media-audio"><span>${esc(asset.file_name || label)}${duration ? ` · ${duration}` : ""}</span><audio controls preload="none" src="${esc(asset.url)}"></audio></div>`;
+    }
+    return `<a class="outline-button" href="${esc(asset.url)}" target="_blank" rel="noopener">دانلود ${esc(label)}</a>`;
+  }).join("")}</div>`;
+}
+
+function messageCardBody(item) {
+  const text = String(item.text || item.caption || "").trim();
+  const media = renderMessageMedia(item);
+  const copy = text
+    ? `<div class="message-text">${esc(text)}</div>`
+    : (media ? "" : `<div class="message-text">[پیام رسانه‌ای]</div>`);
+  return `${media}${copy}`;
+}
+
 function renderMessages() {
   $("messageGrid").innerHTML = state.messages.length ? state.messages.map((item) => {
-    const text = item.text || item.caption || "[پیام رسانه‌ای]";
     const selected = state.selectedMessages.has(item.id);
     const sender = senderLabel(item);
     const analysisComplete = item.ai_enrichment_status === "validated" || Boolean((item.speaker_tags || []).length);
@@ -1475,7 +1526,7 @@ function renderMessages() {
     return `<article class="message-card ${selected ? "selected" : ""} ${analysisComplete ? "analysis-complete" : ""}"${analysisComplete ? ' data-analysis-state="complete"' : ""}>
       <div class="message-head"><div class="message-source"><span class="source-avatar">${esc((item.source_chat_title || "خ").slice(0, 1))}</span><b>${esc(item.source_chat_title || item.source_chat_username || "منبع")}</b></div><input class="select-check" type="checkbox" ${selected ? "checked" : ""} onchange="selectMessage(${item.id},this.checked)" aria-label="انتخاب پیام"></div>
       <div><span class="status-pill ${esc(item.status)}">${statusLabel(item.status)}</span>${analysisComplete ? `<span class="analysis-status-tag">تحلیل‌شده</span>` : ""} ${analysisTags || (item.detected_person_name ? `<span class="status-pill">${esc(item.detected_person_name)}</span>` : "")}</div>
-      <div class="message-text">${esc(text)}</div>
+      ${messageCardBody(item)}
       <div class="trace-meta"><span>👤 ارسال‌کننده/کارشناس: <b>${esc(sender)}</b></span><span>📍 مبدأ فوروارد: <b>${esc(origin)}</b></span></div>
       <div class="message-meta"><span class="message-timestamp"><span>${esc(timestamp.date)}</span><time datetime="${esc(timestamp.raw)}">${esc(timestamp.time)}</time></span><span>${n(item.media_count)} رسانه · ${n(item.link_count)} لینک</span></div>
       <div class="message-actions"><button class="detail-btn" onclick="openMessage(${item.id})">جزئیات</button></div>
@@ -1611,9 +1662,14 @@ async function openMessage(id, allowSpeakerCorrection = false) {
         </div>
         <button type="submit" class="primary-button">تأیید اصلاح گوینده</button>
       </form>` : "";
+    const detailText = String(item.text || item.caption || "").trim();
+    const detailCopy = detailText
+      ? `<div class="detail-text">${esc(detailText)}</div>`
+      : (messageMediaItems(item).length ? "" : `<div class="detail-text">[پیام بدون متن]</div>`);
     // Text first, then editorial details. Raw metadata/analysis JSON stays hidden from operators.
     $("messageDetail").innerHTML = `
-      <div class="detail-text">${esc(item.text || item.caption || "[پیام بدون متن]")}</div>
+      ${renderMessageMedia(item)}
+      ${detailCopy}
       <div class="detail-links">${publicPostLink}${links.map(([label, link]) => `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(label)} ↗</a>`).join("")}<button type="button" class="outline-button" onclick="searchMessageInGoogle(${Number(id)})">جست‌وجوی کامل متن در گوگل</button></div>
       <div class="detail-grid">
         <div class="detail-field"><small>منبع</small>${esc(item.source_chat_title || item.source_chat_username || item.source_chat_id)}</div>

@@ -1534,6 +1534,7 @@ app.include_router(
         editorial_automation,
         get_target_chat_id,
         run_bot_queue_recovery,
+        bale,
     )
 )
 

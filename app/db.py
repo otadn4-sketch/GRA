@@ -420,7 +420,7 @@ def _sender_profile_key(record: dict[str, Any]) -> str:
 def _media_payload(message: dict[str, Any]) -> tuple[str, str, int]:
     media: list[dict[str, Any]] = []
     message_type = "text"
-    for kind in ("photo", "video", "document", "audio", "voice", "animation", "sticker"):
+    for kind in ("photo", "video", "document", "audio", "voice", "animation", "sticker", "video_note"):
         value = message.get(kind)
         if not value:
             continue
@@ -439,6 +439,145 @@ def _media_payload(message: dict[str, Any]) -> tuple[str, str, int]:
         message_type = "poll"
         media.append({"type": "poll", "item": message["poll"]})
     return message_type, dumps(media), len(media)
+
+
+BALE_MEDIA_MAX_BYTES = 20 * 1024 * 1024
+_MEDIA_KIND_MIME = {
+    "photo": "image/jpeg",
+    "sticker": "image/webp",
+    "video": "video/mp4",
+    "animation": "video/mp4",
+    "video_note": "video/mp4",
+    "audio": "audio/mpeg",
+    "voice": "audio/ogg",
+}
+
+
+def _media_file_id(item: dict[str, Any] | None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("file_id") or "").strip()
+
+
+def _largest_photo_item(items: Any) -> dict[str, Any] | None:
+    if isinstance(items, dict):
+        nested = items.get("sizes") or items.get("items") or items.get("photo")
+        if isinstance(nested, list):
+            items = nested
+        elif _media_file_id(items):
+            return items
+        else:
+            return None
+    if not isinstance(items, list):
+        return None
+    candidates = [item for item in items if _media_file_id(item)]
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda item: (
+            int(item.get("file_size") or 0),
+            int(item.get("width") or 0) * int(item.get("height") or 0),
+        ),
+    )
+
+
+def _media_play_mode(kind: str, mime_type: str) -> str | None:
+    mime = str(mime_type or "").lower()
+    if kind in {"photo", "sticker"} or mime.startswith("image/"):
+        return "image"
+    if kind in {"video", "animation", "video_note"} or mime.startswith("video/"):
+        return "video"
+    if kind in {"audio", "voice"} or mime.startswith("audio/"):
+        return "audio"
+    return None
+
+
+def _media_asset_from_file(kind: str, item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    file_id = _media_file_id(item)
+    if not file_id:
+        return None
+    mime_type = str(item.get("mime_type") or "").strip() or _MEDIA_KIND_MIME.get(kind, "")
+    play = _media_play_mode(kind, mime_type)
+    if kind == "document" and not play:
+        return None
+    if not play:
+        return None
+    file_size = int(item.get("file_size") or 0)
+    return {
+        "kind": kind,
+        "play": play,
+        "file_id": file_id,
+        "mime_type": mime_type or None,
+        "file_name": str(item.get("file_name") or "").strip() or None,
+        "duration": item.get("duration"),
+        "width": item.get("width"),
+        "height": item.get("height"),
+        "file_size": file_size or None,
+        "too_large": file_size > BALE_MEDIA_MAX_BYTES,
+    }
+
+
+def extract_message_media_assets(media_payload: Any) -> list[dict[str, Any]]:
+    blocks = loads(media_payload, []) or []
+    if isinstance(blocks, dict):
+        blocks = [blocks]
+    if not isinstance(blocks, list):
+        return []
+    assets: list[dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        kind = str(block.get("type") or "").strip().lower()
+        if kind == "photo":
+            photo = _largest_photo_item(block.get("items") if block.get("items") is not None else block.get("item"))
+            asset = _media_asset_from_file("photo", photo)
+        else:
+            asset = _media_asset_from_file(kind, block.get("item") if isinstance(block.get("item"), dict) else block)
+        if asset:
+            assets.append(asset)
+    return assets
+
+
+def message_media_assets(row: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not row:
+        return []
+    assets = extract_message_media_assets(row.get("media_json"))
+    if assets:
+        return assets
+    raw = loads(row.get("raw_message_json"), {}) or {}
+    if not isinstance(raw, dict) or not raw:
+        return []
+    _, media_json, _ = _media_payload(raw)
+    return extract_message_media_assets(media_json)
+
+
+def public_message_media(row: dict[str, Any] | None) -> list[dict[str, Any]]:
+    message_id = int((row or {}).get("id") or 0)
+    items: list[dict[str, Any]] = []
+    for index, asset in enumerate(message_media_assets(row)):
+        too_large = bool(asset.get("too_large"))
+        items.append(
+            {
+                "index": index,
+                "kind": asset.get("kind"),
+                "play": asset.get("play"),
+                "url": None if too_large or not message_id else f"/admin/api/messages/{message_id}/media/{index}",
+                "mime_type": asset.get("mime_type"),
+                "file_name": asset.get("file_name"),
+                "duration": asset.get("duration"),
+                "file_size": asset.get("file_size"),
+                "too_large": too_large,
+            }
+        )
+    return items
+
+
+def attach_public_message_media(items: list[dict[str, Any]]) -> None:
+    for item in items:
+        item["media_items"] = public_message_media(item)
 
 
 SCHEMA = r"""
@@ -3243,6 +3382,7 @@ class Database:
             _attach_flow_timestamp(item, "published_at", "received_at", "created_at")
         await self._attach_automatic_editorial_ratings(items)
         await self.attach_sender_profile_displays(items)
+        attach_public_message_media(items)
         return {"total": int((total_row or {}).get("c") or 0), "items": items}
 
     async def list_message_ids_dashboard(
@@ -3379,6 +3519,7 @@ class Database:
         await self._attach_automatic_editorial_ratings([item])
         _attach_flow_timestamp(item, "published_at", "received_at", "created_at")
         await self.attach_sender_profile_displays([item])
+        attach_public_message_media([item])
         return item
 
     async def replace_message_speaker_tags(

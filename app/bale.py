@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 import httpx
@@ -33,6 +34,7 @@ class BaleClient:
         self.base_url = base_url.rstrip("/")
         self.retries = max(1, retries)
         self._client = httpx.AsyncClient(timeout=timeout)
+        self._file_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -92,6 +94,41 @@ class BaleClient:
             text,
             show_alert=show_alert,
         )
+
+    async def get_file(self, file_id: str) -> dict[str, Any]:
+        key = str(file_id or "").strip()
+        if not key:
+            raise BaleAPIError("getFile", None, "شناسه فایل خالی است.")
+        now = time.monotonic()
+        cached = self._file_cache.get(key)
+        if cached and cached[0] > now:
+            return dict(cached[1])
+        expired = [cache_key for cache_key, (expires, _) in self._file_cache.items() if expires <= now]
+        for cache_key in expired:
+            self._file_cache.pop(cache_key, None)
+        result = dict(await self._call("getFile", {"file_id": key}) or {})
+        if len(self._file_cache) >= 512:
+            oldest = min(self._file_cache, key=lambda item: self._file_cache[item][0])
+            self._file_cache.pop(oldest, None)
+        self._file_cache[key] = (now + 50 * 60, result)
+        return result
+
+    def file_download_url(self, file_path: str) -> str:
+        path = str(file_path or "").replace("\\", "/").lstrip("/")
+        if not path or ".." in path.split("/"):
+            raise BaleAPIError("getFile", None, "مسیر فایل نامعتبر است.")
+        return f"{self.base_url}/file/bot{self.token}/{path}"
+
+    async def open_file_stream(
+        self,
+        file_path: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        url = self.file_download_url(file_path)
+        timeout = httpx.Timeout(20.0, read=180.0, write=30.0, pool=20.0)
+        request = self._client.build_request("GET", url, headers=headers or {})
+        return await self._client.send(request, stream=True, timeout=timeout)
 
     async def send_message(self, chat_id: int, text: str, **kwargs: Any) -> dict[str, Any]:
         return dict(await self._call("sendMessage", {"chat_id": chat_id, "text": text, **_clean(kwargs)}))

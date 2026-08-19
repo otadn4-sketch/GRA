@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 from openpyxl import load_workbook
@@ -27,9 +27,10 @@ import qrcode
 from .auth import ROLE_PERMISSIONS, ROLE_TITLES, AdminPrincipal, VALID_ROLES
 from .bulletins import BulletinService
 from .backup import create_backup
+from .bale import BaleAPIError, BaleClient
 from .bulletin_cleanup import bulletin_run_directory, remove_bulletin_run_directory
 from .config import Settings
-from .db import Database, EditorialDraftConflictError, comparable_utc_iso, eitan_axis_public, parse_eitan_upload
+from .db import Database, EditorialDraftConflictError, comparable_utc_iso, eitan_axis_public, message_media_assets, parse_eitan_upload
 from .gapgpt_status import fetch_gapgpt_status
 from .live_update import apply_update_zip, current_version, last_update_status, request_reload
 from .scheduler import BulletinScheduler
@@ -469,6 +470,7 @@ def create_dashboard_router(
     editorial_automation: EditorialAutomationService,
     get_target_chat_id: Callable[[], Any],
     bot_queue_recovery_runner: Callable[[int, int], Awaitable[None]] | None = None,
+    bale: BaleClient | None = None,
 ) -> APIRouter:
     router = APIRouter()
     bot_queue_recovery_task: asyncio.Task[None] | None = None
@@ -1562,6 +1564,82 @@ def create_dashboard_router(
         if not item:
             raise HTTPException(404, "پیام پیدا نشد.")
         return item
+
+    @router.get("/admin/api/messages/{message_id}/media/{media_index}")
+    async def message_media(
+        message_id: int,
+        media_index: int,
+        request: Request,
+        _: str = Depends(admin_identity),
+    ) -> StreamingResponse:
+        if bale is None or not bale.enabled:
+            raise HTTPException(503, "اتصال بله برای دریافت رسانه در دسترس نیست.")
+        item = await db.get_message(message_id)
+        if not item:
+            raise HTTPException(404, "پیام پیدا نشد.")
+        assets = message_media_assets(item)
+        if media_index < 0 or media_index >= len(assets):
+            raise HTTPException(404, "رسانه پیدا نشد.")
+        asset = assets[media_index]
+        file_id = str(asset.get("file_id") or "").strip()
+        if not file_id:
+            raise HTTPException(404, "شناسه فایل رسانه موجود نیست.")
+        if asset.get("too_large"):
+            raise HTTPException(413, "حجم این فایل از سقف ۲۰ مگابایت بله بیشتر است.")
+        try:
+            info = await bale.get_file(file_id)
+        except BaleAPIError as exc:
+            raise HTTPException(502, f"دریافت فایل از بله ممکن نشد: {exc}") from exc
+        file_path = str(info.get("file_path") or "").strip()
+        if not file_path:
+            raise HTTPException(404, "مسیر فایل از بله برنگشت.")
+        upstream_headers: dict[str, str] = {}
+        range_header = request.headers.get("range")
+        if range_header:
+            upstream_headers["Range"] = range_header
+        try:
+            upstream = await bale.open_file_stream(file_path, headers=upstream_headers or None)
+        except BaleAPIError as exc:
+            raise HTTPException(502, f"دانلود فایل از بله ممکن نشد: {exc}") from exc
+        if upstream.status_code >= 400:
+            await upstream.aclose()
+            raise HTTPException(502, "دانلود فایل از بله ناموفق بود.")
+        mime = (
+            str(asset.get("mime_type") or "").strip()
+            or str(upstream.headers.get("content-type") or "").split(";")[0].strip()
+            or "application/octet-stream"
+        )
+        headers: dict[str, str] = {
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+        }
+        accept_ranges = upstream.headers.get("accept-ranges")
+        if accept_ranges:
+            headers["Accept-Ranges"] = accept_ranges
+        elif range_header or mime.startswith(("video/", "audio/")):
+            headers["Accept-Ranges"] = "bytes"
+        if upstream.headers.get("content-range"):
+            headers["Content-Range"] = upstream.headers["content-range"]
+        if upstream.headers.get("content-length"):
+            headers["Content-Length"] = upstream.headers["content-length"]
+        file_name = str(asset.get("file_name") or "").strip()
+        if file_name:
+            ascii_name = re.sub(r"[^A-Za-z0-9._-]+", "_", file_name).strip("._")[:80] or "media"
+            headers["Content-Disposition"] = f'inline; filename="{ascii_name}"'
+
+        async def iterator():
+            try:
+                async for chunk in upstream.aiter_bytes(64 * 1024):
+                    yield chunk
+            finally:
+                await upstream.aclose()
+
+        return StreamingResponse(
+            iterator(),
+            status_code=upstream.status_code,
+            media_type=mime,
+            headers=headers,
+        )
 
     @router.put("/admin/api/messages/{message_id}/rating")
     async def save_message_rating(
