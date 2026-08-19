@@ -635,7 +635,62 @@ def extract_message_media_assets(media_payload: Any) -> list[dict[str, Any]]:
             asset = _media_asset_from_file(kind, block.get("item") if isinstance(block.get("item"), dict) else block)
         if asset:
             assets.append(asset)
-    return assets
+    return _dedupe_media_assets(assets)
+
+
+_KIND_RANK = {
+    "photo": 5,
+    "video": 5,
+    "audio": 5,
+    "animation": 4,
+    "video_note": 3,
+    "voice": 3,
+    "sticker": 2,
+    "document": 1,
+}
+
+
+def _media_asset_sort_key(asset: dict[str, Any]) -> tuple[int, int, int]:
+    return (
+        _KIND_RANK.get(str(asset.get("kind") or ""), 0),
+        int(asset.get("file_size") or 0),
+        int(asset.get("width") or 0) * int(asset.get("height") or 0),
+    )
+
+
+def _dedupe_media_assets(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one visible image, video, and audio per message.
+
+    Bale often sends the same clip both as ``photo``/``video`` and as
+    ``document``, or stores two photo sizes as separate blocks. Stream cards
+    should show each of those once.
+    """
+    if len(assets) <= 1:
+        return assets
+    by_file_id: dict[str, dict[str, Any]] = {}
+    rest: list[dict[str, Any]] = []
+    for asset in assets:
+        file_id = str(asset.get("file_id") or "").strip()
+        if not file_id:
+            rest.append(asset)
+            continue
+        current = by_file_id.get(file_id)
+        if current is None or _media_asset_sort_key(asset) > _media_asset_sort_key(current):
+            by_file_id[file_id] = asset
+    unique = list(by_file_id.values()) + rest
+    best_by_play: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for asset in unique:
+        play = str(asset.get("play") or "")
+        if not play:
+            continue
+        if play not in best_by_play:
+            order.append(play)
+            best_by_play[play] = asset
+            continue
+        if _media_asset_sort_key(asset) > _media_asset_sort_key(best_by_play[play]):
+            best_by_play[play] = asset
+    return [best_by_play[play] for play in order]
 
 
 def message_media_assets(row: dict[str, Any] | None) -> list[dict[str, Any]]:

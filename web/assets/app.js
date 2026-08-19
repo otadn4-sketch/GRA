@@ -1468,7 +1468,21 @@ function formatMediaDuration(value) {
 }
 
 function messageMediaItems(item) {
-  return Array.isArray(item?.media_items) ? item.media_items : [];
+  const assets = Array.isArray(item?.media_items) ? item.media_items : [];
+  const best = new Map();
+  const rank = {photo: 5, video: 5, audio: 5, animation: 4, video_note: 3, voice: 3, sticker: 2, document: 1};
+  for (const asset of assets) {
+    const key = asset.play || asset.kind || asset.url;
+    if (!key) continue;
+    const prev = best.get(key);
+    const score = (left, right) => {
+      const leftRank = (rank[left?.kind] || 0) * 1e12 + Number(left?.file_size || 0);
+      const rightRank = (rank[right?.kind] || 0) * 1e12 + Number(right?.file_size || 0);
+      return leftRank - rightRank;
+    };
+    if (!prev || score(asset, prev) > 0) best.set(key, asset);
+  }
+  return [...best.values()];
 }
 
 function handleStreamMediaError(el) {
@@ -1504,13 +1518,11 @@ function renderMessageMedia(item) {
       return `<a class="message-media-photo" href="${esc(asset.url)}" target="_blank" rel="noopener"><img src="${esc(asset.url)}" alt="${esc(asset.file_name || label)}" data-media-label="${esc(label)}" loading="lazy" onerror="handleStreamMediaError(this)"></a>`;
     }
     if (asset.play === "video") {
-      const mime = esc(asset.mime_type || "video/mp4");
-      return `<video class="message-media-video" controls preload="metadata" playsinline data-media-label="${esc(label)}" onerror="handleStreamMediaError(this)"><source src="${esc(asset.url)}" type="${mime}" onerror="handleStreamMediaError(this.closest('video') || this)"></video>`;
+      return `<video class="message-media-video" controls preload="metadata" playsinline src="${esc(asset.url)}" data-media-label="${esc(label)}" onerror="handleStreamMediaError(this)"></video>`;
     }
     if (asset.play === "audio") {
       const duration = formatMediaDuration(asset.duration);
-      const mime = esc(asset.mime_type || "audio/mpeg");
-      return `<div class="message-media-audio"><span>${esc(asset.file_name || label)}${duration ? ` · ${duration}` : ""}</span><audio controls preload="metadata" data-media-label="${esc(label)}" onerror="handleStreamMediaError(this)"><source src="${esc(asset.url)}" type="${mime}" onerror="handleStreamMediaError(this.closest('audio') || this)"></audio></div>`;
+      return `<div class="message-media-audio"><span>${esc(asset.file_name || label)}${duration ? ` · ${duration}` : ""}</span><audio controls preload="metadata" src="${esc(asset.url)}" data-media-label="${esc(label)}" onerror="handleStreamMediaError(this)"></audio></div>`;
     }
     return `<a class="outline-button" href="${esc(asset.url)}" target="_blank" rel="noopener">دانلود ${esc(label)}</a>`;
   }).join("")}</div>`;

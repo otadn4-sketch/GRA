@@ -41,6 +41,27 @@ class StreamMediaTests(unittest.TestCase):
         self.assertEqual(assets[0]["file_id"], "photo-1")
         self.assertEqual(assets[1]["file_id"], "video-1")
 
+    def test_extract_keeps_one_image_and_one_video(self) -> None:
+        assets = extract_message_media_assets(
+            [
+                {
+                    "type": "photo",
+                    "items": [
+                        {"file_id": "thumb", "file_size": 20, "width": 40, "height": 40},
+                        {"file_id": "full", "file_size": 200, "width": 800, "height": 600},
+                    ],
+                },
+                {
+                    "type": "document",
+                    "item": {"file_id": "photo-file", "mime_type": "image/jpeg", "file_name": "news.jpg", "file_size": 180},
+                },
+                {"type": "photo", "item": {"file_id": "extra", "file_size": 50, "width": 120, "height": 90}},
+                {"type": "video", "item": {"file_id": "clip", "mime_type": "video/mp4", "file_size": 900}},
+                {"type": "document", "item": {"file_id": "clip-file", "mime_type": "video/mp4", "file_name": "clip.mp4", "file_size": 800}},
+            ]
+        )
+        self.assertEqual([(item["play"], item["file_id"]) for item in assets], [("image", "full"), ("video", "clip")])
+
     def test_mime_ignores_octet_stream_for_playable_media(self) -> None:
         self.assertEqual(
             resolve_media_mime(
