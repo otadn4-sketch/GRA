@@ -192,7 +192,7 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 .garaye-word-cloud{position:relative;display:block;min-height:340px;height:clamp(340px,35vw,430px);padding:0!important;overflow:hidden;isolation:isolate;background:radial-gradient(ellipse at center,#fbffff 0%,#edf8f6 66%,#e8f1f4 100%)}
 .garaye-word{position:absolute;z-index:1;display:block;max-width:calc(100% - 16px);margin:0;border:1px solid transparent;border-radius:10px;padding:4px 7px;transform:translate(-50%,-50%);font-family:ShabnamDashboard,IRZarWeb,IRZar,Tahoma,Arial,sans-serif;font-size:var(--word-size);font-weight:var(--word-weight,560);line-height:1.28;white-space:nowrap;cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,filter .16s ease;box-shadow:0 3px 9px rgba(0,55,56,.055)}
 .garaye-word:hover,.garaye-word:focus-visible{z-index:4;transform:translate(-50%,-50%) scale(1.08);filter:saturate(1.18);box-shadow:0 8px 18px rgba(0,55,56,.16);outline:2px solid rgba(0,128,128,.42);outline-offset:2px}
-.garaye-word.central{z-index:3;padding:7px 11px;border-color:currentColor;box-shadow:0 10px 25px rgba(0,55,56,.16)}
+.garaye-word.is-selected{z-index:4;outline:2px solid #008080;outline-offset:2px}
 .word-tone-0{color:#007a79;background:rgba(0,128,128,.11)}.word-tone-1{color:#2563a8;background:rgba(37,99,168,.105)}.word-tone-2{color:#6d48a5;background:rgba(109,72,165,.10)}.word-tone-3{color:#9a6900;background:rgba(201,146,13,.13)}.word-tone-4{color:#985c32;background:rgba(152,92,50,.115)}.word-tone-5{color:#157363;background:rgba(21,115,99,.105)}
 .garaye-word-cloud-empty{position:absolute;inset:0;display:grid;place-content:center;gap:7px;padding:28px;text-align:center;color:#46696a}.garaye-word-cloud-empty b{color:#073c3d;font-size:15px}.garaye-word-cloud-empty span{max-width:320px;font-size:12px;line-height:1.9}
 @media(max-width:560px){.garaye-word-cloud{min-height:300px;height:340px}.garaye-word{padding:3px 5px}.garaye-word.central{padding:5px 8px}}
@@ -305,6 +305,11 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 .time24-native{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .time24 select{min-height:44px;min-width:4.8rem;flex:1;border:1px solid rgba(0,78,79,.22);border-radius:11px;background:#fff;color:var(--ink);padding:8px 10px;text-align:center;appearance:none}
 .time24-sep{color:#006767;font-weight:800;font-size:16px}
+.stream-filter-window .time24,.garaye-window .time24{justify-content:center;gap:8px}
+.stream-filter-window .time24 select,.garaye-window .time24 select{
+  min-width:3.4rem;width:3.4rem;flex:0 0 3.4rem;min-height:44px;padding:0;
+  border-radius:10px;text-align:center;
+}
 .qs-window-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:4px 0 12px}
 .qs-window-card{display:grid;gap:10px;padding:16px;border:1px solid rgba(0,128,128,.22);border-radius:16px;background:linear-gradient(160deg,#fff,#edf8f6)}
 .qs-window-card header{display:grid;gap:2px}
@@ -412,27 +417,61 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 .desk-new-person-box p{margin:0;color:var(--muted);font-size:12px}
 .source-title-edit{display:flex;gap:8px;align-items:center;margin-top:10px}
 .source-title-edit input{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:7px 10px}
-.garaye-filter-card{align-items:start;margin-bottom:18px}
-.garaye-filter-card .qs-picker-copy h4{font-size:18px}
-.garaye-filter-card .garaye-filter{
-  margin:0;padding:0;border:0;grid-template-columns:repeat(3,minmax(0,1fr));
+.garaye-filter-card{
+  display:block;
+  margin-bottom:18px;
+  padding:18px;
 }
-.garaye-filter-card .garaye-filter .primary-button{min-height:44px;align-self:end}
-.garaye-share-list{display:grid;gap:8px;margin-top:16px}
-.garaye-share-caption{color:#004e4f;font-size:12px;font-weight:700}
-.garaye-share-row{display:grid;grid-template-columns:88px minmax(0,1fr) 64px;gap:10px;align-items:center}
-.garaye-share-row b,.garaye-share-row small{font-size:12px;color:#004e4f}
-.garaye-share-track{
-  height:18px;border-radius:9px;overflow:hidden;
-  background:rgba(0,78,79,.08);display:flex;
+.garaye-filter-card > h3{margin:0 0 12px;font-size:18px}
+.garaye-filter-card .stream-filters{
+  margin:0;padding:0;border:0;background:transparent;border-radius:0;
 }
-.garaye-share-track i{display:block;height:100%;background:linear-gradient(90deg,#008080,#4f46e5);min-width:0}
+.garaye-preset-fields{grid-template-columns:1fr}
+.garaye-window{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 28px;align-items:start}
+.garaye-window-half{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(148px,.75fr);gap:12px 14px;align-items:end}
+.garaye-window .field{display:grid;gap:6px;margin:0;color:#003738;font-size:12px;min-width:0}
+.garaye-window .jalali-date-input,.garaye-window select{width:100%;min-height:44px;border:1px solid rgba(0,78,79,.22);border-radius:11px;background:#fff;padding:9px 11px;color:var(--ink)}
+.garaye-full-panel{margin-top:18px}
+.eitan-gara-entry{margin-bottom:18px}
+.garaye-treemap{
+  position:relative;margin-top:16px;height:clamp(280px,34vw,440px);
+  overflow:hidden;border:1px solid rgba(0,78,79,.16);border-radius:14px;background:#f4fbfa;
+}
+.garaye-treemap-empty{position:absolute;inset:0;display:grid;place-content:center;padding:24px;text-align:center;color:var(--muted)}
+.garaye-treemap-cell{
+  position:absolute;display:grid;place-content:center;gap:2px;padding:6px;
+  overflow:hidden;border:1px solid rgba(255,255,255,.88);cursor:pointer;
+  text-align:center;transition:opacity .16s ease,box-shadow .16s ease;
+}
+.garaye-treemap-cell b,.garaye-treemap-cell small{display:block;line-height:1.25;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.garaye-treemap-cell b{font-size:clamp(10px,1.05vw,16px)}
+.garaye-treemap-cell small{font-size:clamp(9px,.9vw,13px);opacity:.92}
+.garaye-treemap-cell.is-dimmed{opacity:.38}
+.garaye-treemap-cell.is-focused{z-index:2;box-shadow:inset 0 0 0 3px #fff,0 0 0 2px #008080}
 .garaye-speaker-people{display:grid;gap:8px;margin-top:16px}
 .garaye-speaker-row{
   display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;
   align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:12px;background:#fff;
+  cursor:pointer;transition:opacity .16s ease,box-shadow .16s ease,border-color .16s ease;
 }
 .garaye-speaker-row p{margin:0;color:var(--muted);font-size:12px}
+.garaye-speaker-row.is-focused{border-color:#008080;box-shadow:0 0 0 3px rgba(0,128,128,.14)}
+.garaye-speaker-row.is-dimmed{opacity:.32}
+.trend-series{cursor:pointer}
+.trend-key{cursor:pointer;padding:4px 6px;border-radius:8px}
+.trend-key.is-focused{background:rgba(0,128,128,.10)}
+.trend-key.is-dimmed{opacity:.28}
+.eitan-axis-buttons{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+.eitan-axis-btn{
+  min-height:44px;padding:8px 16px;border-radius:12px;border:1px solid rgba(0,78,79,.22);
+  background:#fff;color:#003738;font-weight:700;
+}
+.eitan-axis-btn:hover{border-color:#008080;background:#edf8f6}
+.eitan-axis-btn.is-active{background:var(--blue);color:#fff;border-color:var(--blue)}
+.eitan-axis-add{border-style:dashed;color:var(--blue)}
+.eitan-create-form{margin-top:16px}
+.eitan-create-form h4{margin:0 0 4px}
+.eitan-create-form > p{margin:0 0 12px;color:var(--muted);font-size:12px}
 .gapgpt-status{display:grid;gap:14px}
 .gapgpt-overall{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:#f6fbfa}
 .gapgpt-group{border:1px solid var(--line);border-radius:16px;padding:14px;background:#fff}
@@ -467,16 +506,15 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 }
 .api-key-docs ul{margin:8px 0 0;padding-right:18px}
 .api-key-docs code{direction:ltr}
-@media(max-width:1050px){
-  .garaye-filter-card .garaye-filter{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
 @media(max-width:850px){
   .garaye-filter-card{grid-template-columns:1fr}
-  .garaye-share-row,.garaye-speaker-row,.gapgpt-overall,.gapgpt-probe{grid-template-columns:1fr}
+  .garaye-window,.garaye-window-half{grid-template-columns:1fr}
+  .garaye-speaker-row,.gapgpt-overall,.gapgpt-probe{grid-template-columns:1fr}
   .source-title-edit{flex-direction:column;align-items:stretch}
+  .eitan-axis-buttons{display:grid;grid-template-columns:1fr 1fr}
 }
 @media(max-width:560px){
-  .garaye-filter-card .garaye-filter{grid-template-columns:1fr}
+  .eitan-axis-buttons{grid-template-columns:1fr}
 }
 
 

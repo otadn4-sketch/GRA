@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import re
 from collections import Counter
@@ -8,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.parse import urlparse
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import aiosqlite
@@ -1236,6 +1239,18 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 CREATE INDEX IF NOT EXISTS ix_api_keys_user
 ON api_keys(user_id, revoked_at);
+
+CREATE TABLE IF NOT EXISTS eitan_axes (
+    axis_id TEXT PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    keywords_text TEXT NOT NULL DEFAULT '',
+    people_text TEXT NOT NULL DEFAULT '',
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_eitan_axes_slug ON eitan_axes(slug);
 """
 
 
@@ -1248,6 +1263,201 @@ DEFAULT_TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("انرژی", ("نفت", "گاز", "برق", "انرژی", "پتروشیمی")),
     ("امنیت و دفاع", ("امنیت", "دفاع", "نظامی", "جنگ", "موشک", "سپاه", "ارتش")),
 )
+
+BUILTIN_EITAN_AXES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        "hormuz",
+        "تنگه هرمز",
+        (
+            "تنگه هرمز",
+            "هرمز",
+            "خلیج فارس",
+            "تنگه",
+            "بندرعباس",
+            "نفتکش",
+            "کشتی",
+            "عبور دریایی",
+            "امنیت دریایی",
+            "بسته شدن تنگه",
+            "ناوگان",
+            "دریای عمان",
+            "قشم",
+            "جاسک",
+            "لاوان",
+            "عبور کشتی",
+            "تنگهٔ هرمز",
+        ),
+        (
+            "مسعود پزشکیان",
+            "محمدباقر قالیباف",
+            "عباس عراقچی",
+            "اسماعیل بقایی",
+            "علی شمخانی",
+            "حسین سلامی",
+            "محمد باقری",
+        ),
+    ),
+    (
+        "energy",
+        "انرژی",
+        (
+            "نفت",
+            "گاز",
+            "برق",
+            "انرژی",
+            "پتروشیمی",
+            "اوپک",
+            "بنزین",
+            "گازوئیل",
+            "نیروگاه",
+            "وزارت نفت",
+            "وزارت نیرو",
+            "صادرات نفت",
+            "قطع برق",
+            "خاموشی",
+            "پالایشگاه",
+            "میعانات گازی",
+            "گاز طبیعی",
+            "سی‌ان‌جی",
+            "میادین نفتی",
+        ),
+        (
+            "محسن پاک‌نژاد",
+            "عباس علی‌آبادی",
+            "جواد اوجی",
+            "بیژن زنگنه",
+            "بیژن نامدار زنگنه",
+            "رضا اردکانیان",
+            "فریدون عباسی",
+        ),
+    ),
+    (
+        "inflation",
+        "تورم",
+        (
+            "تورم",
+            "گرانی",
+            "قیمت",
+            "معیشت",
+            "سبد کالا",
+            "نقدینگی",
+            "بانک مرکزی",
+            "نرخ ارز",
+            "دلار",
+            "گران شدن",
+            "قدرت خرید",
+            "شاخص قیمت",
+            "هزینه زندگی",
+            "یارانه",
+            "کالاهای اساسی",
+            "گرانی کالا",
+        ),
+        (
+            "محمدرضا فرزین",
+            "عبدالناصر همتی",
+            "احسان خاندوزی",
+            "سید علی مدنی‌زاده",
+            "علی مدنی‌زاده",
+        ),
+    ),
+)
+
+EITAN_FILE_MAX_BYTES = 2 * 1024 * 1024
+EITAN_TEXT_MAX_CHARS = 200_000
+EITAN_SEARCH_TERM_LIMIT = 60
+_EITAN_HEADER_TERMS = {
+    "کلیدواژه",
+    "کلیدواژه‌ها",
+    "keyword",
+    "keywords",
+    "نام",
+    "افراد",
+    "شخص",
+    "افراد شاخص",
+    "title",
+    "name",
+}
+
+
+def split_eitan_terms(text: str | None) -> list[str]:
+    seen: set[str] = set()
+    terms: list[str] = []
+    for raw_line in str(text or "").replace("\r", "\n").split("\n"):
+        line = " ".join(raw_line.split()).strip()
+        if not line or line.startswith("#"):
+            continue
+        chunks = re.split(r"[|،;]+", line)
+        if len(chunks) == 1 and "," in line and "\t" not in line:
+            chunks = [part.strip() for part in line.split(",")]
+        for chunk in chunks:
+            term = " ".join(str(chunk or "").split())
+            if len(term) < 2:
+                continue
+            key = canonical_key(term) or term
+            if key in _EITAN_HEADER_TERMS or key in seen:
+                continue
+            seen.add(key)
+            terms.append(term)
+    return terms
+
+
+def parse_eitan_upload(filename: str | None, data: bytes) -> str:
+    payload = data or b""
+    if len(payload) > EITAN_FILE_MAX_BYTES:
+        raise ValueError("حجم فایل نباید بیشتر از ۲ مگابایت باشد.")
+    name = str(filename or "").strip().lower()
+    lines: list[str] = []
+    if name.endswith((".xlsx", ".xlsm")):
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
+        try:
+            sheet = workbook.active
+            for row in sheet.iter_rows(min_col=1, max_col=1, values_only=True):
+                value = row[0] if row else None
+                if value is None:
+                    continue
+                text = " ".join(str(value).split())
+                if text:
+                    lines.append(text)
+        finally:
+            workbook.close()
+    elif name.endswith(".csv"):
+        sample = payload.decode("utf-8-sig", errors="replace")
+        for row in csv.reader(io.StringIO(sample)):
+            if not row:
+                continue
+            text = " ".join(str(row[0] or "").split())
+            if text:
+                lines.append(text)
+    else:
+        lines = payload.decode("utf-8-sig", errors="replace").splitlines()
+    terms = split_eitan_terms("\n".join(lines))
+    if not terms:
+        raise ValueError("در فایل عبارتی برای جست‌وجو پیدا نشد.")
+    stored = "\n".join(terms)
+    if len(stored) > EITAN_TEXT_MAX_CHARS:
+        raise ValueError("حجم فهرست عبارات بیش از حد مجاز است.")
+    return stored
+
+
+def eitan_axis_public(row: dict[str, Any], *, include_terms: bool = False) -> dict[str, Any]:
+    keywords = split_eitan_terms(row.get("keywords_text"))
+    people = split_eitan_terms(row.get("people_text"))
+    payload = {
+        "axis_id": row.get("axis_id"),
+        "slug": row.get("slug"),
+        "title": row.get("title"),
+        "is_builtin": bool(int(row.get("is_builtin") or 0)),
+        "keyword_count": len(keywords),
+        "people_count": len(people),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+    if include_terms:
+        payload["keywords"] = keywords
+        payload["people"] = people
+    return payload
 
 
 class Database:
@@ -1640,6 +1850,7 @@ class Database:
             await conn.commit()
         finally:
             await conn.close()
+        await self.ensure_builtin_eitan_axes()
 
     async def ensure_bootstrap_admin(
         self,
@@ -2083,6 +2294,100 @@ class Database:
             (utc_now(), int(api_key_id), int(user_id)),
         )
         return True
+
+    async def ensure_builtin_eitan_axes(self) -> None:
+        now = utc_now()
+        for slug, title, keywords, people in BUILTIN_EITAN_AXES:
+            axis_id = f"eitan-{slug}"
+            keywords_text = "\n".join(keywords)
+            people_text = "\n".join(people)
+            existing = await self._fetchone(
+                "SELECT axis_id FROM eitan_axes WHERE slug=?",
+                (slug,),
+            )
+            if existing:
+                await self._execute(
+                    """
+                    UPDATE eitan_axes
+                    SET title=?, keywords_text=?, people_text=?, is_builtin=1, updated_at=?
+                    WHERE slug=? AND is_builtin=1
+                    """,
+                    (title, keywords_text, people_text, now, slug),
+                )
+                continue
+            await self._execute(
+                """
+                INSERT INTO eitan_axes(
+                    axis_id, slug, title, keywords_text, people_text,
+                    is_builtin, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (axis_id, slug, title, keywords_text, people_text, now, now),
+            )
+
+    async def list_eitan_axes(self) -> list[dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT * FROM eitan_axes
+            ORDER BY is_builtin DESC, created_at ASC, title ASC
+            """
+        )
+        return [eitan_axis_public(row) for row in rows]
+
+    async def get_eitan_axis(self, axis_id: str) -> dict[str, Any] | None:
+        row = await self._fetchone(
+            "SELECT * FROM eitan_axes WHERE axis_id=?",
+            (str(axis_id or "").strip(),),
+        )
+        return row
+
+    async def create_eitan_axis(
+        self,
+        *,
+        title: str,
+        keywords_text: str,
+        people_text: str,
+    ) -> dict[str, Any]:
+        heading = " ".join(str(title or "").split())
+        if not heading:
+            raise ValueError("عنوان محور را وارد کنید.")
+        if len(heading) > 80:
+            raise ValueError("عنوان محور نباید بیشتر از ۸۰ نویسه باشد.")
+        keywords = split_eitan_terms(keywords_text)
+        people = split_eitan_terms(people_text)
+        if not keywords:
+            raise ValueError("فایل کلیدواژه‌ها باید دست‌کم یک عبارت داشته باشد.")
+        if not people:
+            raise ValueError("فایل افراد شاخص باید دست‌کم یک نام داشته باشد.")
+        now = utc_now()
+        axis_id = str(uuid4())
+        slug = f"custom-{axis_id.replace('-', '')[:12]}"
+        await self._execute(
+            """
+            INSERT INTO eitan_axes(
+                axis_id, slug, title, keywords_text, people_text,
+                is_builtin, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+            """,
+            (axis_id, slug, heading, "\n".join(keywords), "\n".join(people), now, now),
+        )
+        row = await self.get_eitan_axis(axis_id)
+        return eitan_axis_public(row or {}, include_terms=True)
+
+    def eitan_search_terms(self, axis: dict[str, Any]) -> list[str]:
+        terms = split_eitan_terms(axis.get("keywords_text"))
+        terms.extend(split_eitan_terms(axis.get("people_text")))
+        seen: set[str] = set()
+        unique: list[str] = []
+        for term in terms:
+            key = canonical_key(term) or term
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(term)
+            if len(unique) >= EITAN_SEARCH_TERM_LIMIT:
+                break
+        return unique
 
     async def revoke_admin_session(self, token: str | None) -> None:
         if token:
@@ -2825,6 +3130,7 @@ class Database:
         status: str | None = None,
         source_chat_id: int | None = None,
         query: str | None = None,
+        terms: list[str] | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 100,
@@ -2832,6 +3138,44 @@ class Database:
     ) -> dict[str, Any]:
         where = ["1=1"]
         params: list[Any] = []
+        if terms is not None:
+            cleaned: list[str] = []
+            seen_terms: set[str] = set()
+            for raw in terms:
+                term = normalize_persian(str(raw or "").strip())
+                if len(term) < 2:
+                    continue
+                key = canonical_key(term) or term
+                if key in seen_terms:
+                    continue
+                seen_terms.add(key)
+                cleaned.append(term)
+                if len(cleaned) >= EITAN_SEARCH_TERM_LIMIT:
+                    break
+            if not cleaned:
+                return {"total": 0, "items": []}
+            or_parts: list[str] = []
+            for term in cleaned:
+                like = f"%{term}%"
+                or_parts.append(
+                    """(
+                        IFNULL(m.normalized_text,'') LIKE ?
+                        OR IFNULL(m.text,'') LIKE ?
+                        OR IFNULL(m.caption,'') LIKE ?
+                        OR IFNULL(m.detected_person_name,'') LIKE ?
+                        OR IFNULL(m.sender_name,'') LIKE ?
+                        OR EXISTS (
+                            SELECT 1 FROM message_speaker_tags st
+                            WHERE st.message_id=m.id AND (
+                                st.speaker_name LIKE ?
+                                OR st.specific_topic LIKE ?
+                                OR st.general_topic LIKE ?
+                            )
+                        )
+                    )"""
+                )
+                params.extend([like] * 8)
+            where.append("(" + " OR ".join(or_parts) + ")")
         if status == "analyzed":
             # Analysis is a workflow state layered on top of the source-review
             # status, so it must not be compared to ``messages.status``.

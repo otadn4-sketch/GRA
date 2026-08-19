@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#008080">
   <title>سامانه خبرنامه گرایه</title>
-  <link rel="stylesheet" href="/admin/assets/app.css?v=11.38.0">
+  <link rel="stylesheet" href="/admin/assets/app.css?v=11.39.0">
 </head>
 <body>
   <div class="app-shell">
@@ -24,6 +24,7 @@
             <span class="nav-submenu-title">دیدبان</span>
             <button class="nav-item nav-sub-item" data-page="monitoring"><span>◫</span> نظارت</button>
             <button class="nav-item nav-sub-item" data-page="garaye"><span>✦</span> گرایه</button>
+            <button class="nav-item nav-sub-item" data-page="eitan-gara"><span>▣</span> ایتان گرا</button>
           </div>
         </details>
         <details class="nav-disclosure nav-menu-group" id="newsmakerNav" aria-label="خبرساز">
@@ -58,7 +59,7 @@
       </nav>
       <div class="sidebar-foot">
           <span class="live-dot"></span>
-        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۸.۰</span></small></div>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۹.۰</span></small></div>
       </div>
     </aside>
 
@@ -540,25 +541,62 @@
             </div>
             <div id="monitoringMetrics" class="metrics-grid"></div>
           </div>
-          <div class="content-grid two-thirds monitoring-layout">
+          <div class="content-grid monitoring-layout">
             <article class="panel"><div class="panel-heading"><div><h3 id="monitoringChartTitle">روند پیام‌های دریافتی</h3><p id="monitoringChartSubtitle">روزهای دارای پیام، از راست به چپ نمایش داده می‌شوند؛ برای دیدن سهم ارسال‌کنندگان همان روز، روی ستون آن کلیک کنید.</p></div><button id="monitoringResetChart" class="text-button hidden" type="button">بازگشت به روند</button></div><div id="monitoringDailyChart" class="monitoring-daily-chart" dir="rtl"></div></article>
-            <article class="panel"><div class="panel-heading"><div><h3>راهنمای امتیاز خودکار</h3><p>امتیازدهی دستی حذف شده و امتیاز از زمان ارسال، تحلیل و نهایی‌سازی ساخته می‌شود.</p></div></div><div class="rating-guide"><b>★ ۱ تا ۵</b><span>۸ تا ۲۳: امتیاز پایهٔ بالا؛ ۲۳ تا ۲۴: کمتر؛ ۰ تا ۸: پایین. تحلیل موتور اول و استفاده در خبر نهایی، هرکدام یک امتیاز می‌افزاید.</span></div></article>
           </div>
           <article class="panel monitoring-senders-panel"><div class="panel-heading"><div><h3>ارسال‌کنندگان</h3><p>نامی که به پروفایل متصل شده است در اینجا نمایش داده می‌شود. کل پیام و میانگین امتیاز خودکار از همهٔ تاریخچه محاسبه می‌شود.</p></div></div><div class="table-wrap"><table><thead><tr><th>پروفایل / ارسال‌کننده</th><th>نوع</th><th>کل پیام</th><th>پیام‌های امتیازدهی‌شده</th><th>میانگین امتیاز خودکار</th><th>پیام‌ها در بازه و روزها</th></tr></thead><tbody id="monitoringRows"></tbody></table></div></article>
         </section>
 
         <section class="page" id="page-garaye">
-          <article class="panel qs-picker-card garaye-filter-card">
-            <div class="qs-picker-copy">
-              <h4>فیلترها</h4>
+          <article class="panel eitan-gara-entry">
+            <div class="panel-heading">
+              <div><span class="eyebrow">محورهای موضوعی</span><h3>ایتان گرا</h3><p>جست‌وجوی همهٔ پیام‌های سامانه بر اساس فایل کلیدواژه‌ها و افراد شاخص هر محور.</p></div>
+              <button type="button" class="primary-button" id="openEitanGara">ایتان گرا</button>
             </div>
-            <div class="garaye-filter">
-              <label>بازهٔ آماده<select id="garayeRangePreset"><option value="today">امروز</option><option value="week">هفتهٔ جاری</option><option value="last7">۷ روز اخیر</option><option value="last30" selected>۳۰ روز اخیر</option><option value="last90">۹۰ روز اخیر</option><option value="year">سال جاری</option><option value="custom">بازهٔ دلخواه</option></select></label>
-              <label>از تاریخ جلالی<input id="garayeFrom" class="jalali-date-input" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۱" autocomplete="off" data-jalali-date></label>
-              <label>ساعت از<input id="garayeFromTime" type="time" dir="ltr" step="60"></label>
-              <label>تا تاریخ جلالی<input id="garayeTo" class="jalali-date-input" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۳۰" autocomplete="off" data-jalali-date></label>
-              <label>ساعت تا<input id="garayeToTime" type="time" dir="ltr" step="60"></label>
-              <button id="applyGarayeFilters" class="primary-button" type="button">اعمال بازه</button>
+          </article>
+          <article class="panel garaye-filter-card">
+            <h3>فیلترها</h3>
+            <div class="stream-filters">
+              <div class="stream-filter-block">
+                <p class="stream-filter-label">جست‌وجو و منبع</p>
+                <div class="stream-filter-fields garaye-preset-fields">
+                  <label class="field">بازهٔ آماده
+                    <select id="garayeRangePreset">
+                      <option value="today">امروز</option>
+                      <option value="week">هفتهٔ جاری</option>
+                      <option value="last7">۷ روز اخیر</option>
+                      <option value="last30" selected>۳۰ روز اخیر</option>
+                      <option value="last90">۹۰ روز اخیر</option>
+                      <option value="year">سال جاری</option>
+                      <option value="custom">بازهٔ دلخواه</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div class="stream-filter-block">
+                <p class="stream-filter-label">بازهٔ زمانی ۲۴ساعته</p>
+                <div class="garaye-window">
+                  <div class="garaye-window-half">
+                    <label class="field">از تاریخ
+                      <input id="garayeFrom" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۱" title="تاریخ جلالی از" autocomplete="off" data-jalali-date>
+                    </label>
+                    <label class="field">از ساعت
+                      <input id="garayeFromTime" type="time" dir="ltr" step="60" title="ساعت شروع به‌صورت ۲۴ساعته">
+                    </label>
+                  </div>
+                  <div class="garaye-window-half">
+                    <label class="field">تا تاریخ
+                      <input id="garayeTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۳۰" title="تاریخ جلالی تا" autocomplete="off" data-jalali-date>
+                    </label>
+                    <label class="field">تا ساعت
+                      <input id="garayeToTime" type="time" dir="ltr" step="60" title="ساعت پایان به‌صورت ۲۴ساعته">
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div class="stream-filter-actions">
+                <button class="primary-button" id="applyGarayeFilters" type="button">اعمال فیلتر</button>
+              </div>
             </div>
           </article>
           <div id="metrics" class="metrics-grid"></div>
@@ -566,26 +604,53 @@
             <div class="panel-heading trend-heading"><div><span class="eyebrow">روند موضوعات</span><h3>موضوعات خبرهای نهایی‌شده</h3><p>روند روزانهٔ موضوع‌ها بر پایهٔ زمان نهایی‌سازی خبر است.</p></div><span class="trend-window" id="trendWindow">—</span></div>
             <div id="topicTrendChart" class="trend-chart skeleton-box">در حال محاسبه روند موضوعات…</div><div id="topicTrendLegend" class="trend-legend"></div>
           </article>
-          <div class="content-grid two-thirds garaye-main-grid">
-            <article class="panel"><div class="panel-heading"><div><h3>ابرواژگان گرایه</h3><p>واژه‌های محتواییِ پالایش‌شده از خبرهای نهایی؛ واژه‌های عمومی و کم‌معنا حذف شده‌اند.</p></div></div><div id="garayeWordCloud" class="garaye-word-cloud" aria-live="polite"></div></article>
-            <article class="panel">
-              <div class="panel-heading"><div><h3>روند روزانهٔ ابرواژگان</h3><p>نمودار منحنی همهٔ واژه‌ها را با هم نشان می‌دهد؛ مستطیل سهم هر واژه از کل همان روز است.</p></div>
-                <label class="word-trend-select">واژه برای سهم روزانه<select id="garayeWordTrendSelect"><option value="">واژه‌ای موجود نیست</option></select></label>
+          <article class="panel garaye-full-panel">
+            <div class="panel-heading"><div><h3>ابرواژگان گرایه</h3><p>واژه‌های محتواییِ پالایش‌شده از خبرهای نهایی؛ واژه‌های عمومی و کم‌معنا حذف شده‌اند.</p></div></div>
+            <div id="garayeWordCloud" class="garaye-word-cloud" aria-live="polite"></div>
+          </article>
+          <article class="panel garaye-full-panel">
+            <div class="panel-heading">
+              <div><h3>روند روزانهٔ ابرواژگان</h3><p>نمودار منحنی همهٔ واژه‌ها را با هم نشان می‌دهد؛ نقشهٔ مستطیلی سهم هر واژه از کل بازه است.</p></div>
+              <label class="word-trend-select">واژه برای برجسته‌سازی<select id="garayeWordTrendSelect"><option value="">واژه‌ای موجود نیست</option></select></label>
+            </div>
+            <div id="garayeWordTrendChart" class="trend-chart">در حال آماده‌سازی نمودار…</div>
+            <div id="garayeWordTrendLegend" class="trend-legend"></div>
+            <div id="garayeWordTreemap" class="garaye-treemap" aria-label="نقشهٔ مستطیلی ابرواژگان"></div>
+          </article>
+          <article class="panel garaye-full-panel">
+            <div class="panel-heading"><div><h3>ترند گویندگان</h3><p>بر پایهٔ خبرهای نهایی‌شدهٔ هر گوینده؛ با کلیک روی نام یا نمودار، همان گوینده انتخاب می‌شود.</p></div></div>
+            <div id="garayeSpeakerChart" class="trend-chart">در حال آماده‌سازی نمودار…</div>
+            <div id="garayeSpeakerLegend" class="trend-legend"></div>
+            <div id="garayeSpeakerPeople" class="garaye-speaker-people"></div>
+          </article>
+        </section>
+
+        <section class="page" id="page-eitan-gara">
+          <article class="panel">
+            <div class="panel-heading">
+              <div><span class="eyebrow">گرایه</span><h3>ایتان گرا</h3><p>یک محور را انتخاب کنید تا همهٔ پیام‌های سامانه با کلیدواژه‌ها و افراد شاخص همان محور جست‌وجو شوند.</p></div>
+              <button type="button" class="outline-button" id="backToGarayeFromEitan">بازگشت به گرایه</button>
+            </div>
+            <div id="eitanAxisButtons" class="eitan-axis-buttons"></div>
+            <form id="eitanCreatePanel" class="inline-form eitan-create-form" hidden>
+              <h4>محور جدید</h4>
+              <p>عنوان محور را بنویسید و دو فایل «کلیدواژه‌ها» و «افراد شاخص» را بارگذاری کنید.</p>
+              <label>عنوان محور<input id="eitanAxisTitle" name="title" maxlength="80" required placeholder="مثلاً امنیت غذایی"></label>
+              <div class="form-grid two">
+                <label>فایل کلیدواژه‌ها<input id="eitanKeywordsFile" name="keywords_file" type="file" accept=".txt,.csv,.xlsx,.xls" required></label>
+                <label>فایل افراد شاخص<input id="eitanPeopleFile" name="people_file" type="file" accept=".txt,.csv,.xlsx,.xls" required></label>
               </div>
-              <div id="garayeWordTrendChart" class="trend-chart">در حال آماده‌سازی نمودار…</div>
-              <div id="garayeWordTrendLegend" class="trend-legend"></div>
-              <div id="garayeWordShare" class="garaye-share-list"></div>
-            </article>
+              <div class="button-row">
+                <button type="submit" class="primary-button" id="submitEitanCreate">ثبت</button>
+                <button type="button" class="ghost-button" id="cancelEitanCreate">انصراف</button>
+              </div>
+            </form>
+          </article>
+          <div class="selection-bar">
+            <div><b id="eitanCount">محور را انتخاب کنید</b><span id="eitanSelectionHint">پیام‌های منطبق با فایل‌های همان محور در همهٔ سامانه نمایش داده می‌شوند.</span></div>
           </div>
-          <div class="content-grid two-thirds garaye-main-grid">
-            <article class="panel">
-              <div class="panel-heading"><div><h3>ترند گویندگان</h3><p>بر پایهٔ خبرهای نهایی‌شدهٔ هر گوینده، با تصویر شناسنامه و نمودار منحنی</p></div></div>
-              <div id="garayeSpeakerChart" class="trend-chart">در حال آماده‌سازی نمودار…</div>
-              <div id="garayeSpeakerLegend" class="trend-legend"></div>
-              <div id="garayeSpeakerPeople" class="garaye-speaker-people"></div>
-            </article>
-            <article class="panel"><div class="panel-heading"><div><h3>ترند سوژه‌های پربازتاب</h3><p>سوژه‌های اصلیِ خبرهایی که در پربازتاب‌های نهایی‌شده حضور دارند؛ نه عنوان خود پربازتاب‌ها.</p></div></div><div id="garayeAttentionTrend" class="garaye-rank-list"></div></article>
-          </div>
+          <div id="eitanMessageGrid" class="message-grid"></div>
+          <div class="stream-more-bar hidden" id="eitanMoreBar"><span id="eitanMoreHint"></span><button type="button" class="outline-button" id="loadMoreEitan">بارگذاری پیام‌های بیشتر</button></div>
         </section>
 
         <section class="page" id="page-high-attention">
@@ -847,7 +912,7 @@
     <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin/assets/wordcloud-layout.js?v=11.38.0" defer></script>
-  <script src="/admin/assets/app.js?v=11.38.0" defer></script>
+  <script src="/admin/assets/wordcloud-layout.js?v=11.39.0" defer></script>
+  <script src="/admin/assets/app.js?v=11.39.0" defer></script>
 </body>
 </html>

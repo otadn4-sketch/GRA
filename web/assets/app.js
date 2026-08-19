@@ -18,6 +18,8 @@ const state = {
   jalaliPicker: {input: null, year: null, month: null},
   deskSubjectConfirmed: false,
   quickStart: {step: 1, dateFrom: "", dateTo: "", timeFrom: "00:00", timeTo: "23:59", analyzing: false, analysisDone: false, highAttentionDay: "", outputDay: ""},
+  garayeSpeakerFocus: "",
+  eitanAxes: [], eitanAxisId: "", eitanMessages: [], eitanOffset: 0, eitanTotal: 0, eitanCreating: false,
 };
 const pageMeta = {
   overview: ["تقویم و مناسبت‌ها", "تقویم رسمی هجری شمسی و مناسبت‌های روز"],
@@ -25,7 +27,8 @@ const pageMeta = {
   automation: ["خودکارسازی", "کنترل مستقل تحلیل هوشمند، کنترل انسانی و کرولر Selenium"],
   finalization: ["نهایی‌سازی خبر", "تدوین متن پایه، خلاصه‌ها و مدیریت نسخه‌ها"],
   monitoring: ["نظارت", "آمار ارسال‌کنندگان، روند روزانه و میانگین امتیاز خودکار پیام‌ها"],
-  garaye: ["گرایه", "نبض محتوای تحریریه: موضوع‌ها، واژه‌ها، گویندگان و پربازتاب‌ها"],
+  garaye: ["گرایه", "نبض محتوای تحریریه: موضوع‌ها، واژه‌ها، گویندگان و ایتان گرا"],
+  "eitan-gara": ["ایتان گرا", "جست‌وجوی پیام‌ها بر اساس محورهای کلیدواژه و افراد شاخص"],
   "high-attention": ["پربازتاب", "انتخاب خبرهای نهایی‌شده و تدوین محورهای پربازتاب"],
   bulletins: ["خبرنامه‌ها", "چینش خبرهای نهایی و تولید خروجی‌های انتشار"],
   people: ["شناسنامه اشخاص", "مدیریت نام، سمت، دسته و کانال اشخاص"],
@@ -661,6 +664,7 @@ async function loadPage(page) {
   if (page === "finalization") return loadFinalizationWorkspace();
   if (page === "monitoring") return loadMonitoring();
   if (page === "garaye") return loadGarayeInsights();
+  if (page === "eitan-gara") return loadEitanGaraPage();
   if (page === "high-attention") return loadHighAttentionWorkspace();
   if (page === "bulletins") return loadBulletinWorkspace();
   if (page === "people") return loadPeople();
@@ -832,7 +836,7 @@ function alignSeriesToDays(rows, days) {
   });
 }
 
-function renderCurvedTrendChart(targetId, legendId, {days, series, emptyText, ariaLabel}) {
+function renderCurvedTrendChart(targetId, legendId, {days, series, emptyText, ariaLabel, focusName = "", onSelect = null}) {
   const target = $(targetId);
   const legend = $(legendId);
   if (!target) return;
@@ -851,6 +855,7 @@ function renderCurvedTrendChart(targetId, legendId, {days, series, emptyText, ar
   const gridSteps = Math.min(4, yMax);
   const xAt = (index) => pad.left + (days.length === 1 ? plotWidth / 2 : index * plotWidth / (days.length - 1));
   const yAt = (value) => pad.top + plotHeight - Math.min(yMax, Number(value || 0)) * plotHeight / yMax;
+  const focused = Boolean(focusName);
   const grid = Array.from({length: gridSteps + 1}, (_, index) => {
     const value = yMax * index / gridSteps;
     const y = yAt(value);
@@ -866,23 +871,52 @@ function renderCurvedTrendChart(targetId, legendId, {days, series, emptyText, ar
     const color = GARAYE_LINE_PALETTE[seriesIndex % GARAYE_LINE_PALETTE.length];
     const values = days.map((_, index) => Number((item.values || [])[index] || 0));
     const points = values.map((value, index) => [xAt(index), yAt(value)]);
+    const dim = focused && item.name !== focusName;
+    const strong = focused && item.name === focusName;
+    const strokeWidth = strong ? 4.2 : (dim ? 2.2 : 2.8);
+    const opacity = dim ? "0.16" : "1";
     const dots = values.map((value, index) => `
-      <circle cx="${xAt(index)}" cy="${yAt(value)}" r="${value ? 3.8 : 2.2}" fill="${color}">
+      <circle cx="${xAt(index)}" cy="${yAt(value)}" r="${value ? (strong ? 5 : 3.8) : 2.2}" fill="${color}">
         <title>${esc(item.name)} · ${esc(garayeShortDate(days[index]))}: ${n(value)}</title>
       </circle>`).join("");
-    return `<g><path d="${catmullRomPath(points)}" fill="none" stroke="${color}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>${dots}</g>`;
+    return `<g class="trend-series" data-series-name="${esc(item.name)}" opacity="${opacity}">
+      <path d="${catmullRomPath(points)}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${catmullRomPath(points)}" fill="none" stroke="transparent" stroke-width="14"/>
+      ${dots}
+    </g>`;
   }).join("");
   target.innerHTML = `
     <svg class="trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(ariaLabel || "نمودار منحنی")}">
       ${grid}${xLabels}${lines}
     </svg>`;
+  if (onSelect) {
+    target.querySelector("svg")?.addEventListener("click", () => onSelect(""));
+    target.querySelectorAll("[data-series-name]").forEach((group) => {
+      group.addEventListener("click", (event) => {
+        event.stopPropagation();
+        onSelect(group.getAttribute("data-series-name") || "");
+      });
+    });
+  }
   if (legend) {
-    legend.innerHTML = series.map((item, index) => `
-      <span class="trend-key">
+    legend.innerHTML = series.map((item, index) => {
+      const dim = focused && item.name !== focusName;
+      const strong = focused && item.name === focusName;
+      return `
+      <span class="trend-key${strong ? " is-focused" : ""}${dim ? " is-dimmed" : ""}" data-series-name="${esc(item.name)}">
         <i class="trend-swatch" style="background:${GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length]}"></i>
         <b>${esc(item.name)}</b>
         <small>${n(item.total)}</small>
-      </span>`).join("");
+      </span>`;
+    }).join("");
+    if (onSelect) {
+      legend.querySelectorAll("[data-series-name]").forEach((key) => {
+        key.addEventListener("click", (event) => {
+          event.stopPropagation();
+          onSelect(key.getAttribute("data-series-name") || "");
+        });
+      });
+    }
   }
 }
 
@@ -916,7 +950,7 @@ function renderGarayeWordCloud(words = state.garayeInsights?.word_cloud || []) {
   target.innerHTML = layout.map((item, index) => {
     const tone = index % 6;
     const strength = item.central ? 760 : Math.max(500, Math.round(470 + (item.fontSize / 44) * 210));
-    return `<button class="garaye-word word-tone-${tone}${item.central ? " central" : ""}" type="button" data-word-index="${index}" style="left:${item.x}px;top:${item.y}px;--word-size:${item.fontSize}px;--word-weight:${strength}" title="${n(item.count)} بار تکرار" aria-label="${esc(item.word)}؛ ${n(item.count)} بار تکرار. برای نمایش روند روزانه کلیک کنید.">${esc(item.word)}</button>`;
+    return `<button class="garaye-word word-tone-${tone}${item.central ? " central" : ""}${item.word === state.garayeWordTrendWord ? " is-selected" : ""}" type="button" data-word="${esc(item.word)}" data-word-index="${index}" style="left:${item.x}px;top:${item.y}px;--word-size:${item.fontSize}px;--word-weight:${strength}" title="${n(item.count)} بار تکرار" aria-label="${esc(item.word)}؛ ${n(item.count)} بار تکرار. برای نمایش روند روزانه کلیک کنید.">${esc(item.word)}</button>`;
   }).join("");
   target.querySelectorAll(".garaye-word").forEach((button) => {
     button.addEventListener("click", () => {
@@ -925,7 +959,7 @@ function renderGarayeWordCloud(words = state.garayeInsights?.word_cloud || []) {
       state.garayeWordTrendWord = item.word;
       $("garayeWordTrendSelect").value = item.word;
       renderGarayeWordTrend();
-      $("garayeWordShare")?.scrollIntoView({behavior: "smooth", block: "center"});
+      $("garayeWordTreemap")?.scrollIntoView({behavior: "smooth", block: "center"});
     });
   });
 }
@@ -956,11 +990,11 @@ async function loadGarayeInsights() {
     loadGarayeOverviewStats(),
   ]);
   state.garayeInsights = data;
+  state.garayeSpeakerFocus = "";
   renderTopicTrend(data.topic_chart || {});
   renderGarayeWordCloud(data.word_cloud || []);
   observeGarayeWordCloud();
   renderGarayeSpeakerTrends();
-  renderGarayeBars("garayeAttentionTrend", data.high_attention?.subjects || [], "سوژهٔ اصلیِ پربازتاب نهایی‌شده‌ای در این بازه نیست.");
   const trendWords = data.word_trends || [];
   const selected = trendWords.some((item) => item.name === state.garayeWordTrendWord)
     ? state.garayeWordTrendWord
@@ -970,6 +1004,91 @@ async function loadGarayeInsights() {
     ? trendWords.map((item) => `<option value="${esc(item.name)}" ${item.name === selected ? "selected" : ""}>${esc(item.name)} · ${n(item.count)}</option>`).join("")
     : '<option value="">واژه‌ای موجود نیست</option>';
   renderGarayeWordTrend();
+}
+
+function layoutTreemap(items, width, height) {
+  const nodes = (items || [])
+    .map((item) => ({name: item.name, value: Math.max(Number(item.value || 0), 0)}))
+    .filter((item) => item.value > 0 && item.name)
+    .sort((a, b) => b.value - a.value);
+  const out = [];
+  const split = (list, x, y, w, h) => {
+    if (!list.length || w < 0.5 || h < 0.5) return;
+    if (list.length === 1) {
+      out.push({...list[0], x, y, w, h});
+      return;
+    }
+    const sum = list.reduce((total, item) => total + item.value, 0) || 1;
+    const half = sum / 2;
+    let acc = 0;
+    let index = 0;
+    for (; index < list.length; index += 1) {
+      acc += list[index].value;
+      if (acc >= half) {
+        index += 1;
+        break;
+      }
+    }
+    if (index <= 0) index = 1;
+    if (index >= list.length) index = list.length - 1;
+    const first = list.slice(0, index);
+    const rest = list.slice(index);
+    const firstSum = first.reduce((total, item) => total + item.value, 0);
+    const ratio = Math.min(0.86, Math.max(0.14, firstSum / sum));
+    if (w >= h) {
+      split(first, x, y, w * ratio, h);
+      split(rest, x + w * ratio, y, w * (1 - ratio), h);
+    } else {
+      split(first, x, y, w, h * ratio);
+      split(rest, x, y + h * ratio, w, h * (1 - ratio));
+    }
+  };
+  split(nodes, 0, 0, width, height);
+  return out;
+}
+
+function garayeTreemapItems() {
+  const cloud = state.garayeInsights?.word_cloud || [];
+  if (cloud.length) {
+    return cloud.slice(0, 48).map((item) => ({name: item.word || item.name, value: Number(item.count || 0)}));
+  }
+  return (state.garayeInsights?.word_trends || []).slice(0, 48).map((item) => ({
+    name: item.name,
+    value: Number(item.count || 0),
+  }));
+}
+
+function renderGarayeWordTreemap() {
+  const host = $("garayeWordTreemap");
+  if (!host) return;
+  const items = garayeTreemapItems();
+  if (!items.length) {
+    host.innerHTML = `<div class="garaye-treemap-empty">واژه‌ای برای نقشهٔ مستطیلی در این بازه نیست.</div>`;
+    return;
+  }
+  const width = 1000;
+  const height = 620;
+  const maxValue = Math.max(1, ...items.map((item) => Number(item.value || 0)));
+  const selected = state.garayeWordTrendWord;
+  const cells = layoutTreemap(items, width, height);
+  host.innerHTML = cells.map((cell) => {
+    const share = Number(cell.value || 0) / maxValue;
+    const fill = `hsl(168 ${42 + share * 28}% ${86 - share * 48}%)`;
+    const ink = share > 0.45 ? "#f7fffe" : "#073c3d";
+    const focused = selected && cell.name === selected;
+    const dimmed = selected && cell.name !== selected;
+    const showLabel = cell.w > 78 && cell.h > 42;
+    const showCount = cell.w > 96 && cell.h > 62;
+    return `<button type="button" class="garaye-treemap-cell${focused ? " is-focused" : ""}${dimmed ? " is-dimmed" : ""}" data-word="${esc(cell.name)}" title="${esc(cell.name)} · ${n(cell.value)}" style="left:${(cell.x / width) * 100}%;top:${(cell.y / height) * 100}%;width:${(cell.w / width) * 100}%;height:${(cell.h / height) * 100}%;background:${fill};color:${ink}">${showLabel ? `<b>${esc(cell.name)}</b>${showCount ? `<small>${n(cell.value)}</small>` : ""}` : ""}</button>`;
+  }).join("");
+  host.querySelectorAll("[data-word]").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      const word = cell.getAttribute("data-word") || "";
+      state.garayeWordTrendWord = word;
+      if ($("garayeWordTrendSelect")) $("garayeWordTrendSelect").value = word;
+      renderGarayeWordTrend();
+    });
+  });
 }
 
 function renderGarayeWordTrend() {
@@ -985,20 +1104,16 @@ function renderGarayeWordTrend() {
     emptyText: "برای این بازه روند ابرواژگان ثبت نشده است.",
     ariaLabel: "نمودار منحنی روند روزانه ابرواژگان",
   });
-  const selected = series.find((item) => item.name === state.garayeWordTrendWord) || series[0];
-  const share = $("garayeWordShare");
-  if (!share) return;
-  if (!selected || !chartDays.length) {
-    share.innerHTML = `<div class="empty-mini">واژه‌ای برای نمایش سهم روزانه انتخاب نشده است.</div>`;
-    return;
-  }
-  const totalByDay = new Map(totals.map((item) => [item.date, Number(item.count || 0)]));
-  share.innerHTML = `<div class="garaye-share-caption">سهم «${esc(selected.name)}» از کل واژه‌های هر روز</div>` + chartDays.map((day, index) => {
-    const wordCount = Number(selected.values[index] || 0);
-    const dayTotal = totalByDay.get(day) || series.reduce((sum, item) => sum + Number(item.values[index] || 0), 0);
-    const percent = dayTotal ? Math.round((wordCount / dayTotal) * 1000) / 10 : 0;
-    return `<article class="garaye-share-row"><small>${esc(garayeShortDate(day))}</small><span class="garaye-share-track" title="${n(wordCount)} از ${n(dayTotal)}"><i style="width:${Math.max(percent, wordCount ? 2 : 0)}%"></i></span><b>${n(percent)}٪</b></article>`;
-  }).join("");
+  renderGarayeWordTreemap();
+  $("garayeWordCloud")?.querySelectorAll(".garaye-word").forEach((button) => {
+    button.classList.toggle("is-selected", button.getAttribute("data-word") === state.garayeWordTrendWord);
+  });
+}
+
+function setGarayeSpeakerFocus(name) {
+  const next = String(name || "").trim();
+  state.garayeSpeakerFocus = state.garayeSpeakerFocus === next ? "" : next;
+  renderGarayeSpeakerTrends();
 }
 
 function renderGarayeSpeakerTrends() {
@@ -1010,6 +1125,8 @@ function renderGarayeSpeakerTrends() {
     series,
     emptyText: "هنوز گویندهٔ مشخصی در این بازه نیست.",
     ariaLabel: "نمودار منحنی ترند گویندگان",
+    focusName: state.garayeSpeakerFocus,
+    onSelect: setGarayeSpeakerFocus,
   });
   const box = $("garayeSpeakerPeople");
   if (!box) return;
@@ -1019,9 +1136,14 @@ function renderGarayeSpeakerTrends() {
       : findPersonBySpeakerName(item.name);
     const personId = person?.person_id || item.person_id;
     const initials = String(item.name || "؟").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || "؟";
+    const focused = state.garayeSpeakerFocus === item.name;
+    const dimmed = state.garayeSpeakerFocus && !focused;
     const avatar = `<span class="person-avatar">${personId ? `<img src="/admin/portraits/${personId}" alt="${esc(item.name)}" onerror="this.remove()">` : ""}<i>${esc(initials)}</i></span>`;
-    return `<article class="garaye-speaker-row">${avatar}<div><b>${esc(item.name)}</b><p>${esc(person?.position || person?.category || "گویندهٔ خبرهای نهایی")}</p></div><small>${n(item.total)} خبر</small></article>`;
+    return `<article class="garaye-speaker-row${focused ? " is-focused" : ""}${dimmed ? " is-dimmed" : ""}" data-speaker-name="${esc(item.name)}">${avatar}<div><b>${esc(item.name)}</b><p>${esc(person?.position || person?.category || "گویندهٔ خبرهای نهایی")}</p></div><small>${n(item.total)} خبر</small></article>`;
   }).join("") : `<div class="empty-mini">هنوز گویندهٔ مشخصی در این بازه نیست.</div>`;
+  box.querySelectorAll("[data-speaker-name]").forEach((row) => {
+    row.addEventListener("click", () => setGarayeSpeakerFocus(row.getAttribute("data-speaker-name") || ""));
+  });
 }
 
 function setGarayeRangePreset(preset, {load = false} = {}) {
@@ -1047,6 +1169,140 @@ function setGarayeRangePreset(preset, {load = false} = {}) {
     $("garayeToTime").value = "23:59";
   }
   if (load && state.page === "garaye") loadGarayeInsights().catch((error) => toast(error.message, true));
+}
+
+function toggleEitanCreate(show) {
+  state.eitanCreating = Boolean(show);
+  const panel = $("eitanCreatePanel");
+  if (panel) panel.hidden = !state.eitanCreating;
+  if (state.eitanCreating) $("eitanAxisTitle")?.focus();
+}
+
+function renderEitanAxes() {
+  const host = $("eitanAxisButtons");
+  if (!host) return;
+  host.innerHTML = "";
+  (state.eitanAxes || []).forEach((axis) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `eitan-axis-btn${state.eitanAxisId === axis.axis_id ? " is-active" : ""}`;
+    button.textContent = axis.title;
+    button.addEventListener("click", () => selectEitanAxis(axis.axis_id).catch((error) => toast(error.message, true)));
+    host.appendChild(button);
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "eitan-axis-btn eitan-axis-add";
+  add.textContent = "اضافه کردن محور جدید";
+  add.addEventListener("click", () => toggleEitanCreate(true));
+  host.appendChild(add);
+}
+
+function renderEitanMessages() {
+  const grid = $("eitanMessageGrid");
+  if (!grid) return;
+  const items = state.eitanMessages || [];
+  grid.innerHTML = items.length ? items.map((item) => {
+    const text = item.text || item.caption || "[پیام رسانه‌ای]";
+    const sender = senderLabel(item);
+    const analysisComplete = item.ai_enrichment_status === "validated" || Boolean((item.speaker_tags || []).length);
+    const timestamp = fdateParts(item.published_at || item.received_at || item.created_at);
+    const origin = item.forwarded_origin_title || (item.forwarded_origin_username ? `@${item.forwarded_origin_username}` : "پیام مستقیم");
+    const analysisTags = (item.speaker_tags || []).map((tag) => `
+      <span class="status-pill approved" title="${esc(tag.specific_topic || "")}">
+        ${esc(tag.speaker_name || "نامشخص")} · ${esc(tag.general_topic || "نامشخص")}
+      </span>`).join("");
+    return `<article class="message-card ${analysisComplete ? "analysis-complete" : ""}"${analysisComplete ? ' data-analysis-state="complete"' : ""}>
+      <div class="message-head"><div class="message-source"><span class="source-avatar">${esc((item.source_chat_title || "خ").slice(0, 1))}</span><b>${esc(item.source_chat_title || item.source_chat_username || "منبع")}</b></div></div>
+      <div><span class="status-pill ${esc(item.status)}">${statusLabel(item.status)}</span>${analysisComplete ? `<span class="analysis-status-tag">تحلیل‌شده</span>` : ""} ${analysisTags || (item.detected_person_name ? `<span class="status-pill">${esc(item.detected_person_name)}</span>` : "")}</div>
+      <div class="message-text">${esc(text)}</div>
+      <div class="trace-meta"><span>👤 ارسال‌کننده/کارشناس: <b>${esc(sender)}</b></span><span>📍 مبدأ فوروارد: <b>${esc(origin)}</b></span></div>
+      <div class="message-meta"><span class="message-timestamp"><span>${esc(timestamp.date)}</span><time datetime="${esc(timestamp.raw)}">${esc(timestamp.time)}</time></span><span>${n(item.media_count)} رسانه · ${n(item.link_count)} لینک</span></div>
+      <div class="message-actions"><button class="detail-btn" onclick="openMessage(${item.id})">جزئیات</button></div>
+    </article>`;
+  }).join("") : `<div class="panel empty-mini">${state.eitanAxisId ? "پیامی مطابق این محور پیدا نشد." : "محور را انتخاب کنید تا پیام‌ها نمایش داده شوند."}</div>`;
+}
+
+async function loadEitanMessages({append = false} = {}) {
+  if (!state.eitanAxisId) {
+    state.eitanMessages = [];
+    state.eitanTotal = 0;
+    state.eitanOffset = 0;
+    if ($("eitanCount")) $("eitanCount").textContent = "محور را انتخاب کنید";
+    $("eitanMoreBar")?.classList.add("hidden");
+    renderEitanMessages();
+    return;
+  }
+  const pageSize = 40;
+  if (!append) {
+    state.eitanOffset = 0;
+    state.eitanMessages = [];
+  }
+  const data = await api(`/admin/api/eitan-axes/${encodeURIComponent(state.eitanAxisId)}/messages?limit=${pageSize}&offset=${state.eitanOffset}`);
+  const incoming = data.items || [];
+  state.eitanTotal = Number(data.total || 0);
+  state.eitanMessages = append ? state.eitanMessages.concat(incoming) : incoming;
+  state.eitanOffset = state.eitanMessages.length;
+  const axisTitle = data.axis?.title || "محور";
+  if ($("eitanCount")) $("eitanCount").textContent = `${n(state.eitanTotal)} پیام برای «${axisTitle}»`;
+  if ($("eitanSelectionHint")) {
+    $("eitanSelectionHint").textContent = `${n(data.terms_count || 0)} عبارت از فایل کلیدواژه‌ها و افراد شاخص در همهٔ پیام‌های سامانه جست‌وجو شد.`;
+  }
+  const moreBar = $("eitanMoreBar");
+  if (moreBar) {
+    const remaining = Math.max(0, state.eitanTotal - state.eitanMessages.length);
+    moreBar.classList.toggle("hidden", remaining <= 0);
+    if ($("eitanMoreHint")) {
+      $("eitanMoreHint").textContent = remaining
+        ? `${n(state.eitanMessages.length)} از ${n(state.eitanTotal)} پیام نمایش داده شده است.`
+        : "";
+    }
+  }
+  renderEitanMessages();
+}
+
+async function selectEitanAxis(axisId) {
+  state.eitanAxisId = axisId;
+  toggleEitanCreate(false);
+  renderEitanAxes();
+  await loadEitanMessages();
+}
+
+async function loadEitanGaraPage() {
+  const data = await api("/admin/api/eitan-axes");
+  state.eitanAxes = data.items || [];
+  if (state.eitanAxisId && !state.eitanAxes.some((axis) => axis.axis_id === state.eitanAxisId)) {
+    state.eitanAxisId = "";
+    state.eitanMessages = [];
+  }
+  renderEitanAxes();
+  if (state.eitanAxisId) await loadEitanMessages();
+  else renderEitanMessages();
+}
+
+async function submitEitanCreate(event) {
+  event.preventDefault();
+  const title = $("eitanAxisTitle")?.value.trim() || "";
+  const keywords = $("eitanKeywordsFile")?.files?.[0];
+  const people = $("eitanPeopleFile")?.files?.[0];
+  if (!title) {
+    toast("عنوان محور را وارد کنید.", true);
+    return;
+  }
+  if (!keywords || !people) {
+    toast("هر دو فایل کلیدواژه‌ها و افراد شاخص را انتخاب کنید.", true);
+    return;
+  }
+  const body = new FormData();
+  body.append("title", title);
+  body.append("keywords_file", keywords);
+  body.append("people_file", people);
+  const created = await api("/admin/api/eitan-axes", {method: "POST", body});
+  toast(`محور «${created.title}» ثبت شد.`);
+  $("eitanCreatePanel")?.reset();
+  toggleEitanCreate(false);
+  await loadEitanGaraPage();
+  if (created.axis_id) await selectEitanAxis(created.axis_id);
 }
 
 async function loadSources(silent = false) {
@@ -3979,6 +4235,11 @@ $("applyGarayeFilters").addEventListener("click", () => loadGarayeInsights().cat
 $("garayeRangePreset").addEventListener("change", () => setGarayeRangePreset($("garayeRangePreset").value, {load: true}));
 ["garayeFrom", "garayeFromTime", "garayeTo", "garayeToTime"].forEach((id) => $(id).addEventListener("input", () => { $("garayeRangePreset").value = "custom"; }));
 $("garayeWordTrendSelect").addEventListener("change", () => { state.garayeWordTrendWord = $("garayeWordTrendSelect").value; renderGarayeWordTrend(); });
+$("openEitanGara")?.addEventListener("click", () => showPage("eitan-gara"));
+$("backToGarayeFromEitan")?.addEventListener("click", () => showPage("garaye"));
+$("cancelEitanCreate")?.addEventListener("click", () => toggleEitanCreate(false));
+$("eitanCreatePanel")?.addEventListener("submit", (event) => submitEitanCreate(event).catch((error) => toast(error.message, true)));
+$("loadMoreEitan")?.addEventListener("click", () => loadEitanMessages({append: true}).catch((error) => toast(error.message, true)));
 $("startEditorialAutomation").addEventListener("click", () => {
   try {
     return editorialAutomationAction(

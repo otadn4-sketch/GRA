@@ -15,7 +15,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
@@ -29,7 +29,7 @@ from .bulletins import BulletinService
 from .backup import create_backup
 from .bulletin_cleanup import bulletin_run_directory, remove_bulletin_run_directory
 from .config import Settings
-from .db import Database, EditorialDraftConflictError, comparable_utc_iso
+from .db import Database, EditorialDraftConflictError, comparable_utc_iso, eitan_axis_public, parse_eitan_upload
 from .gapgpt_status import fetch_gapgpt_status
 from .live_update import apply_update_zip, current_version, last_update_status, request_reload
 from .scheduler import BulletinScheduler
@@ -924,6 +924,68 @@ def create_dashboard_router(
             object_id=str(api_key_id),
         )
         return {"ok": True}
+
+    @router.get("/admin/api/eitan-axes")
+    async def list_eitan_axes(
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        return {"items": await db.list_eitan_axes()}
+
+    @router.post("/admin/api/eitan-axes")
+    async def create_eitan_axis(
+        request: Request,
+        actor: str = Depends(admin_identity),
+        title: str = Form(...),
+        keywords_file: UploadFile = File(...),
+        people_file: UploadFile = File(...),
+    ) -> dict[str, Any]:
+        try:
+            keywords_text = parse_eitan_upload(
+                keywords_file.filename,
+                await keywords_file.read(),
+            )
+            people_text = parse_eitan_upload(
+                people_file.filename,
+                await people_file.read(),
+            )
+            created = await db.create_eitan_axis(
+                title=title,
+                keywords_text=keywords_text,
+                people_text=people_text,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await audit(
+            request,
+            actor,
+            "eitan_axis_created",
+            object_type="eitan_axis",
+            object_id=str(created.get("axis_id") or ""),
+            details={"title": created.get("title")},
+        )
+        return created
+
+    @router.get("/admin/api/eitan-axes/{axis_id}/messages")
+    async def eitan_axis_messages(
+        axis_id: str,
+        limit: int = Query(40, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        axis = await db.get_eitan_axis(axis_id)
+        if not axis:
+            raise HTTPException(404, "محور پیدا نشد.")
+        terms = db.eitan_search_terms(axis)
+        result = await db.list_messages_dashboard(
+            terms=terms,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            **result,
+            "axis": eitan_axis_public(axis),
+            "terms_count": len(terms),
+        }
 
     @router.get("/admin/api/me/profile")
     async def current_admin_profile(
