@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#008080">
   <title>سامانه خبرنامه گرایه</title>
-  <link rel="stylesheet" href="/admin/assets/app.css?v=11.37.0">
+  <link rel="stylesheet" href="/admin/assets/app.css?v=11.38.0">
 </head>
 <body>
   <div class="app-shell">
@@ -51,13 +51,14 @@
             <button class="nav-item nav-sub-item" data-page="sources"><span>⌁</span> منابع پایش</button>
             <button class="nav-item nav-sub-item" data-page="portal"><span>♟</span> پرتال کاربری</button>
             <button class="nav-item nav-sub-item" data-page="users" data-permission="users.manage"><span>♟</span> کاربران و دسترسی</button>
+            <button class="nav-item nav-sub-item" data-page="api-keys"><span>⚿</span> کلیدهای API</button>
             <button class="nav-item nav-sub-item" data-page="system"><span>⚙</span> وضعیت سامانه</button>
           </div>
         </details>
       </nav>
       <div class="sidebar-foot">
           <span class="live-dot"></span>
-        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۷.۰</span></small></div>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۱.۳۸.۰</span></small></div>
       </div>
     </aside>
 
@@ -406,22 +407,38 @@
               </form>
             </aside>
             <aside id="deskSubjectEditor" class="desk-subject-editor hidden" aria-live="polite">
-              <div class="block-head">
-                <div>
-                  <span class="eyebrow">مرحلهٔ اصلاح مشخصات</span>
-                  <h4 id="deskSubjectHeading">مشخصات انتخاب‌شده</h4>
-                  <p id="deskSubjectHint">ابتدا مشخصات فرد یا رویداد را اصلاح کنید؛ سپس برای هر پیام اقدام جداگانه انجام دهید.</p>
-                </div>
+              <div class="desk-subject-copy">
+                <h4 id="deskSubjectHeading">اصلاح مشخصات</h4>
+                <p id="deskSubjectHint">گوینده را از شناسنامه انتخاب کنید یا شخص جدید بسازید؛ سپس ثبت را بزنید.</p>
               </div>
-              <div id="deskPersonFields" class="form-grid three hidden">
-                <label>نام گوینده<input id="deskPersonName" placeholder="نام کامل گوینده"></label>
-                <label>سمت<input id="deskPersonPosition" placeholder="سمت یا عنوان رسمی"></label>
-                <label>دسته<select id="deskPersonCategory"><option value="">انتخاب دسته</option></select></label>
+              <div id="deskPersonFields" class="hidden">
+                <label>نام گوینده
+                  <div class="desk-combobox" id="deskPersonCombobox">
+                    <input id="deskPersonSearch" type="search" autocomplete="off" placeholder="جست‌وجو در شناسنامه یا انتخاب «شخص جدید»">
+                    <div id="deskPersonOptions" class="desk-combobox-options hidden" role="listbox"></div>
+                  </div>
+                </label>
+                <input id="deskPersonId" type="hidden">
+                <input id="deskPersonName" type="hidden">
+                <input id="deskPersonMode" type="hidden">
+                <div id="deskNewPersonBox" class="desk-new-person-box hidden">
+                  <b>شخص جدید</b>
+                  <p>نام، سمت و دسته را بنویسید. با ثبت، شخص در شناسنامه ذخیره می‌شود.</p>
+                  <label>نام<input id="deskNewPersonName" placeholder="نام کامل گوینده"></label>
+                </div>
+                <div id="deskPersonMetaFields" class="form-grid two hidden">
+                  <label>سمت<input id="deskPersonPosition" placeholder="سمت یا عنوان رسمی"></label>
+                  <label>دسته<select id="deskPersonCategory"><option value="">انتخاب دسته</option></select></label>
+                </div>
               </div>
               <div id="deskEventFields" class="form-grid three hidden">
                 <label>عنوان رویداد<input id="deskEventTitle" placeholder="عنوان رویداد"></label>
                 <label>محل رویداد<input id="deskEventLocation" placeholder="محل وقوع"></label>
                 <label>زمان رویداد<input id="deskEventTime" placeholder="زمان وقوع"></label>
+              </div>
+              <div class="button-row desk-subject-actions">
+                <button type="button" class="primary-button" id="confirmDeskSubject">ثبت مشخصات</button>
+                <span id="deskSubjectConfirmHint" class="desk-subject-confirm-hint"></span>
               </div>
             </aside>
             <div class="analysis-selection-bar">
@@ -531,10 +548,11 @@
         </section>
 
         <section class="page" id="page-garaye">
-          <article class="panel garaye-hero">
-            <div class="panel-heading"><div><span class="eyebrow">دیدبان تحریریه</span><h3>گرایه؛ نبض خبرهای نهایی‌شده</h3><p>همهٔ روندهای محتوایی این بخش فقط از خبرهای نهایی‌شده ساخته می‌شوند.</p></div></div>
+          <article class="panel qs-picker-card garaye-filter-card">
+            <div class="qs-picker-copy">
+              <h4>فیلترها</h4>
+            </div>
             <div class="garaye-filter">
-              <div class="garaye-filter-title"><span class="eyebrow">تعیین بازه</span><small>از میان بازه‌های آماده انتخاب کنید یا تاریخ و ساعت دلخواه وارد کنید.</small></div>
               <label>بازهٔ آماده<select id="garayeRangePreset"><option value="today">امروز</option><option value="week">هفتهٔ جاری</option><option value="last7">۷ روز اخیر</option><option value="last30" selected>۳۰ روز اخیر</option><option value="last90">۹۰ روز اخیر</option><option value="year">سال جاری</option><option value="custom">بازهٔ دلخواه</option></select></label>
               <label>از تاریخ جلالی<input id="garayeFrom" class="jalali-date-input" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۱" autocomplete="off" data-jalali-date></label>
               <label>ساعت از<input id="garayeFromTime" type="time" dir="ltr" step="60"></label>
@@ -544,19 +562,30 @@
             </div>
           </article>
           <div id="metrics" class="metrics-grid"></div>
-          <article class="panel overview-status-panel">
-            <div class="panel-heading"><div><h3>وضعیت جریان اخبار</h3><p>میزان پیشرفت غربالگری و سهم منابع فعال</p></div></div>
-            <div class="overview-status-layout"><div id="statusDonut" class="donut-wrap"></div><div id="sourceSummary" class="source-summary"></div></div>
-          </article>
           <article class="panel trend-panel">
             <div class="panel-heading trend-heading"><div><span class="eyebrow">روند موضوعات</span><h3>موضوعات خبرهای نهایی‌شده</h3><p>روند روزانهٔ موضوع‌ها بر پایهٔ زمان نهایی‌سازی خبر است.</p></div><span class="trend-window" id="trendWindow">—</span></div>
             <div id="topicTrendChart" class="trend-chart skeleton-box">در حال محاسبه روند موضوعات…</div><div id="topicTrendLegend" class="trend-legend"></div>
           </article>
           <div class="content-grid two-thirds garaye-main-grid">
             <article class="panel"><div class="panel-heading"><div><h3>ابرواژگان گرایه</h3><p>واژه‌های محتواییِ پالایش‌شده از خبرهای نهایی؛ واژه‌های عمومی و کم‌معنا حذف شده‌اند.</p></div></div><div id="garayeWordCloud" class="garaye-word-cloud" aria-live="polite"></div></article>
-            <article class="panel"><div class="panel-heading"><div><h3>روند روزانهٔ ابرواژگان</h3><p>یک واژه را انتخاب کنید تا تغییر تکرار آن در روزهای بازه نمایش داده شود.</p></div><label class="word-trend-select">واژه<select id="garayeWordTrendSelect"><option value="">واژه‌ای موجود نیست</option></select></label></div><div id="garayeWordTrend" class="garaye-mini-chart"></div></article>
+            <article class="panel">
+              <div class="panel-heading"><div><h3>روند روزانهٔ ابرواژگان</h3><p>نمودار منحنی همهٔ واژه‌ها را با هم نشان می‌دهد؛ مستطیل سهم هر واژه از کل همان روز است.</p></div>
+                <label class="word-trend-select">واژه برای سهم روزانه<select id="garayeWordTrendSelect"><option value="">واژه‌ای موجود نیست</option></select></label>
+              </div>
+              <div id="garayeWordTrendChart" class="trend-chart">در حال آماده‌سازی نمودار…</div>
+              <div id="garayeWordTrendLegend" class="trend-legend"></div>
+              <div id="garayeWordShare" class="garaye-share-list"></div>
+            </article>
           </div>
-          <div class="content-grid two-thirds garaye-main-grid"><article class="panel"><div class="panel-heading"><div><h3>ترند گویندگان</h3><p>بر پایهٔ خبرهای نهایی‌شدهٔ هر گوینده</p></div></div><div id="garayeSpeakerTrends" class="garaye-rank-list"></div></article><article class="panel"><div class="panel-heading"><div><h3>ترند سوژه‌های پربازتاب</h3><p>سوژه‌های اصلیِ خبرهایی که در پربازتاب‌های نهایی‌شده حضور دارند؛ نه عنوان خود پربازتاب‌ها.</p></div></div><div id="garayeAttentionTrend" class="garaye-rank-list"></div></article></div>
+          <div class="content-grid two-thirds garaye-main-grid">
+            <article class="panel">
+              <div class="panel-heading"><div><h3>ترند گویندگان</h3><p>بر پایهٔ خبرهای نهایی‌شدهٔ هر گوینده، با تصویر شناسنامه و نمودار منحنی</p></div></div>
+              <div id="garayeSpeakerChart" class="trend-chart">در حال آماده‌سازی نمودار…</div>
+              <div id="garayeSpeakerLegend" class="trend-legend"></div>
+              <div id="garayeSpeakerPeople" class="garaye-speaker-people"></div>
+            </article>
+            <article class="panel"><div class="panel-heading"><div><h3>ترند سوژه‌های پربازتاب</h3><p>سوژه‌های اصلیِ خبرهایی که در پربازتاب‌های نهایی‌شده حضور دارند؛ نه عنوان خود پربازتاب‌ها.</p></div></div><div id="garayeAttentionTrend" class="garaye-rank-list"></div></article>
+          </div>
         </section>
 
         <section class="page" id="page-high-attention">
@@ -729,13 +758,59 @@
           </article>
         </section>
 
+        <section class="page" id="page-api-keys">
+          <article class="panel">
+            <div class="panel-heading">
+              <div>
+                <h3>کلیدهای API</h3>
+                <p>با این کلیدها می‌توانید از بیرون سامانه، همان مسیرهای داشبورد را با مجوز حساب خودتان فراخوانی کنید. مقدار کامل کلید فقط یک‌بار هنگام ساخت نمایش داده می‌شود.</p>
+              </div>
+            </div>
+            <form id="apiKeyForm" class="inline-form always-visible">
+              <div class="form-grid two">
+                <label>نام کلید<input id="apiKeyName" required maxlength="80" placeholder="مثلاً اتصال گزارش‌گیری"></label>
+              </div>
+              <div class="button-row"><button type="submit" class="primary-button">ساخت کلید جدید</button></div>
+            </form>
+            <div id="apiKeySecretBox" class="api-key-secret hidden" role="status"></div>
+            <div class="table-wrap"><table><thead><tr><th>نام</th><th>پیشوند</th><th>ساخته‌شده</th><th>آخرین استفاده</th><th>وضعیت</th><th></th></tr></thead><tbody id="apiKeyRows"></tbody></table></div>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><div><h3>نحوه استفاده</h3><p>کلید را در سرآیند درخواست بفرستید. مجوزها همان نقش حساب سازندهٔ کلید است.</p></div></div>
+            <div class="api-key-docs">
+              <p>یکی از دو سرآیند زیر کافی است:</p>
+              <pre dir="ltr">Authorization: Bearer gry_…</pre>
+              <pre dir="ltr">X-Api-Key: gry_…</pre>
+              <p>نمونهٔ مسیرها:</p>
+              <ul>
+                <li><code dir="ltr">GET /admin/api/me</code> هویت حساب</li>
+                <li><code dir="ltr">GET /admin/api/messages</code> فهرست پیام‌ها</li>
+                <li><code dir="ltr">GET /admin/api/sources</code> منابع پایش</li>
+                <li><code dir="ltr">GET /admin/api/editorial-drafts</code> پیش‌نویس‌ها</li>
+                <li><code dir="ltr">GET /admin/api/system</code> وضعیت سامانه</li>
+              </ul>
+            </div>
+          </article>
+        </section>
+
         <section class="page" id="page-system">
           <div class="metrics-grid" id="systemMetrics"></div>
           <article class="panel"><div class="panel-heading"><div><h3>توکن و قیمت</h3><p>مصرف ثبت‌شدهٔ هر مدل و هزینهٔ محاسبه‌شده بر پایهٔ نرخ هر یک میلیون توکن (دلار)</p></div><b id="aiUsageTotal">$0.000000</b></div><div class="table-wrap"><table><thead><tr><th>نام مدل</th><th>توکن ورودی</th><th>توکن خروجی</th><th>قیمت ورودی / میلیون</th><th>قیمت خروجی / میلیون</th><th>هزینه کل</th></tr></thead><tbody id="aiUsageRows"></tbody></table></div></article>
           <div class="content-grid two-thirds">
             <article class="panel"><div class="panel-heading"><div><h3>سلامت سرویس</h3><p>پایگاه داده، هوش، زمان‌بندی و تنظیمات عملیاتی</p></div><button class="outline-button" id="backupNow">پشتیبان فوری</button></div><div id="healthChecks" class="health-list"></div></article>
-            <article class="panel"><div class="panel-heading"><div><h3>رویدادهای اخیر</h3><p>ردپای فعالیت سامانه</p></div></div><div id="eventList" class="event-list"></div></article>
+            <article class="panel"><div class="panel-heading"><div><h3>رویدادهای اخیر</h3><p>ردپای فعالیت سامانه</p></div></div>            <div id="eventList" class="event-list"></div></article>
           </div>
+          <article class="panel gapgpt-status-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="eyebrow">پایش بیرونی</span>
+                <h3>وضعیت APIهای گپ‌جی‌پی‌تی</h3>
+                <p>همان پایش‌های صفحهٔ status.gapgpt.app، با پوستهٔ گرایه. منبع زنده هر بار که این صفحه باز شود خوانده می‌شود.</p>
+              </div>
+              <a class="outline-button" href="https://status.gapgpt.app/status" target="_blank" rel="noopener">صفحه اصلی وضعیت</a>
+            </div>
+            <div id="gapgptStatus" class="gapgpt-status">در حال دریافت وضعیت…</div>
+          </article>
           <article class="panel live-update-panel" data-permission="system.manage">
             <div class="panel-heading"><div><span class="eyebrow">به‌روزرسانی زنده</span><h3>آپلود نسخه جدید بدون توقف دستی</h3><p>بسته ZIP نسخه جدید را انتخاب کنید. فایل‌های برنامه جایگزین می‌شوند و اگر سرویس با حالت نظارت‌شده اجرا شده باشد، سامانه خودش راه‌اندازی مجدد می‌شود. داده، .env و پشتیبان‌ها دست نخورده می‌مانند.</p></div></div>
             <form id="liveUpdateForm" class="inline-form always-visible">
@@ -772,7 +847,7 @@
     <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin/assets/wordcloud-layout.js?v=11.37.0" defer></script>
-  <script src="/admin/assets/app.js?v=11.37.0" defer></script>
+  <script src="/admin/assets/wordcloud-layout.js?v=11.38.0" defer></script>
+  <script src="/admin/assets/app.js?v=11.38.0" defer></script>
 </body>
 </html>

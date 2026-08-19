@@ -30,6 +30,7 @@ from .backup import create_backup
 from .bulletin_cleanup import bulletin_run_directory, remove_bulletin_run_directory
 from .config import Settings
 from .db import Database, EditorialDraftConflictError, comparable_utc_iso
+from .gapgpt_status import fetch_gapgpt_status
 from .live_update import apply_update_zip, current_version, last_update_status, request_reload
 from .scheduler import BulletinScheduler
 from .editorial_automation import EditorialAutomationService
@@ -129,6 +130,10 @@ class PersonCategoryRename(BaseModel):
 
 class PersonCategoryCreate(BaseModel):
     title: str
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
 
 
 class TopicCreate(BaseModel):
@@ -471,6 +476,8 @@ def create_dashboard_router(
     def required_permission(request: Request) -> str:
         path = request.url.path
         method = request.method.upper()
+        if path.startswith("/admin/api/api-keys"):
+            return "dashboard.view"
         if path.startswith("/admin/api/users/senders") or path == "/admin/api/users/roles":
             return "dashboard.view"
         if path.startswith("/admin/api/users/") and path.endswith("/profile") and method == "GET":
@@ -513,6 +520,17 @@ def create_dashboard_router(
             return "system.manage"
         return "dashboard.view"
 
+    def request_api_token(request: Request) -> str | None:
+        auth = str(request.headers.get("authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+            if token:
+                return token
+        header = str(
+            request.headers.get("x-api-key") or request.headers.get("X-Api-Key") or ""
+        ).strip()
+        return header or None
+
     async def resolve_principal(
         request: Request,
         credentials: HTTPBasicCredentials | None,
@@ -522,6 +540,13 @@ def create_dashboard_router(
         principal = await db.principal_from_session(
             request.cookies.get("garaye_session")
         )
+        if principal:
+            return principal
+        api_token = request_api_token(request)
+        if api_token:
+            principal = await db.principal_from_api_key(api_token)
+            if principal:
+                return principal
         bootstrap_valid = bool(
             credentials
             and secrets.compare_digest(credentials.username, settings.admin_username)
@@ -546,10 +571,13 @@ def create_dashboard_router(
     ) -> str:
         principal = await resolve_principal(request, credentials)
         if not principal:
+            headers = {}
+            if not request_api_token(request):
+                headers["WWW-Authenticate"] = 'Basic realm="Garaye Dashboard"'
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="نام کاربری یا رمز عبور نادرست است.",
-                headers={"WWW-Authenticate": 'Basic realm="Garaye Dashboard"'},
+                headers=headers,
             )
         permission = required_permission(request)
         if not principal.can(permission):
@@ -839,6 +867,63 @@ def create_dashboard_router(
             "last_login_at": (user or {}).get("last_login_at"),
             "version": current_version(),
         }
+
+    def require_named_account(request: Request) -> int:
+        principal: AdminPrincipal = request.state.admin_principal
+        if principal.user_id is None:
+            raise HTTPException(
+                422,
+                "ساخت و مدیریت کلید API فقط برای حساب‌های ثبت‌شده در سامانه ممکن است.",
+            )
+        return int(principal.user_id)
+
+    @router.get("/admin/api/api-keys")
+    async def list_api_keys(
+        request: Request,
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        user_id = require_named_account(request)
+        return {"items": await db.list_api_keys(user_id)}
+
+    @router.post("/admin/api/api-keys")
+    async def create_api_key(
+        payload: ApiKeyCreate,
+        request: Request,
+        actor: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        user_id = require_named_account(request)
+        try:
+            created = await db.create_api_key(user_id, payload.name)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await audit(
+            request,
+            actor,
+            "api_key_created",
+            object_type="api_key",
+            object_id=str(created["api_key_id"]),
+            details={"name": created["name"], "token_prefix": created["token_prefix"]},
+        )
+        return created
+
+    @router.delete("/admin/api/api-keys/{api_key_id}")
+    async def revoke_api_key(
+        api_key_id: int,
+        request: Request,
+        actor: str = Depends(admin_identity),
+    ) -> dict[str, bool]:
+        user_id = require_named_account(request)
+        ok = await db.revoke_api_key(user_id, api_key_id)
+        if not ok:
+            raise HTTPException(404, "کلید پیدا نشد.")
+        await audit(
+            request,
+            actor,
+            "api_key_revoked",
+            object_type="api_key",
+            object_id=str(api_key_id),
+        )
+        return {"ok": True}
 
     @router.get("/admin/api/me/profile")
     async def current_admin_profile(
@@ -1726,6 +1811,10 @@ def create_dashboard_router(
                 },
             },
         }
+
+    @router.get("/admin/api/system/gapgpt-status")
+    async def gapgpt_status(_: str = Depends(admin_identity)) -> dict[str, Any]:
+        return await fetch_gapgpt_status()
 
     def read_crawler_channels() -> list[str]:
         path = settings.crawler_channels_path

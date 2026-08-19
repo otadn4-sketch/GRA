@@ -16,6 +16,7 @@ const state = {
   garayeWordTrendWord: "", personProfileId: null, calendar: {year: null, month: null, selectedDay: null, eventsByDay: new Map(), apiError: ""},
   streamOffset: 0, streamTotal: 0,
   jalaliPicker: {input: null, year: null, month: null},
+  deskSubjectConfirmed: false,
   quickStart: {step: 1, dateFrom: "", dateTo: "", timeFrom: "00:00", timeTo: "23:59", analyzing: false, analysisDone: false, highAttentionDay: "", outputDay: ""},
 };
 const pageMeta = {
@@ -31,6 +32,7 @@ const pageMeta = {
   "person-profile": ["پروفایل شخص", "مشخصات، کانال‌ها و خبرهای منتسب به یک شخص"],
   sources: ["منابع پایش", "کانال‌های اشخاص و گروه‌های پشتیبانی"],
   users: ["کاربران و دسترسی", "تعریف حساب، نقش و مجوزهای هر کاربر"],
+  "api-keys": ["کلیدهای API", "ساخت و ابطال کلید برای فراخوانی برنامه‌ای سامانه"],
   system: ["وضعیت سامانه", "سلامت اجزا، رویدادها، به‌روزرسانی زنده و پشتیبان‌گیری"],
   portal: ["پرتال کاربری", "نمایه، نقش، آمار ارسال و تنظیمات شخصی حساب شما"],
   "quick-start": ["شروع سریع", "انجام مرحله‌ای تحلیل، نهایی‌سازی، پربازتاب و خروجی خبرنامه"],
@@ -665,6 +667,7 @@ async function loadPage(page) {
   if (page === "person-profile") return loadPersonProfile();
   if (page === "sources") return loadSources();
   if (page === "users") return loadAdminUsers();
+  if (page === "api-keys") return loadApiKeys();
   if (page === "system") return loadSystem();
   if (page === "portal") return loadUserPortal();
   if (page === "quick-start") return loadQuickStart();
@@ -700,11 +703,6 @@ async function loadGarayeOverviewStats() {
     ["تحلیل‌شده", counts.analyzed, "✦", "green"],
     ["منابع فعال", counts.active_sources, "⌁", "red"],
   ].map(([label, value, icon, tone]) => `<article class="metric-card"><span class="metric-icon ${tone}">${icon}</span><div><b>${n(value)}</b><small>${label}</small></div></article>`).join("");
-  const total = Math.max(1, Number(counts.total || 0));
-  const analyzed = Number(counts.analyzed || 0) / total * 100;
-  const pending = Number(counts.pending || 0) / total * 100;
-  $("statusDonut").innerHTML = `<div class="donut" style="background:conic-gradient(#4F46E5 0 ${analyzed}%,#F59E0B ${analyzed}% ${analyzed + pending}%,#94A3B8 ${analyzed + pending}% 100%)"><div class="donut-center"><b>${n(counts.total)}</b><small>پیام</small></div></div>`;
-  $("sourceSummary").innerHTML = (stats.by_source || []).slice(0, 4).map((item) => `<div class="source-row"><span>${esc(item.source_name || "نامشخص")}</span><b>${n(item.total)}</b></div>`).join("") || `<div class="empty-mini">منبعی ثبت نشده است.</div>`;
   return stats;
 }
 
@@ -784,12 +782,116 @@ function garayeDateLabel(value) {
 
 function renderGarayeBars(targetId, rows, emptyText) {
   const target = $(targetId);
+  if (!target) return;
   const values = rows || [];
   const max = Math.max(1, ...values.map((item) => Number(item.count || 0)));
   target.innerHTML = values.length ? values.map((item) => {
     const width = Math.max(6, Math.round(Number(item.count || 0) / max * 100));
     return `<article class="garaye-rank-row"><b title="${esc(item.name || item.date || "")}">${esc(item.name || garayeDateLabel(item.date))}</b><span class="garaye-rank-track"><i style="width:${width}%"></i></span><small>${n(item.count)}</small></article>`;
   }).join("") : `<div class="empty-mini">${esc(emptyText)}</div>`;
+}
+
+const GARAYE_LINE_PALETTE = ["#007c7c", "#4f46e5", "#c27500", "#0f766e", "#db2777", "#0284c7", "#65a30d", "#7c3aed", "#8a4a2c", "#475569"];
+
+function garayeShortDate(value) {
+  const date = new Date(`${value}T12:00:00+03:30`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+      timeZone: "Asia/Tehran", month: "2-digit", day: "2-digit",
+    }).format(date);
+}
+
+function catmullRomPath(points) {
+  if (!points.length) return "";
+  if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`;
+  let path = `M ${points[0][0]} ${points[0][1]}`;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const p0 = points[Math.max(0, index - 1)];
+    const p1 = points[index];
+    const p2 = points[index + 1];
+    const p3 = points[Math.min(points.length - 1, index + 2)];
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    path += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${p2[0]} ${p2[1]}`;
+  }
+  return path;
+}
+
+function alignSeriesToDays(rows, days) {
+  return (rows || []).map((item) => {
+    const byDate = new Map((item.series || []).map((row) => [row.date, Number(row.count || 0)]));
+    return {
+      name: item.name,
+      total: Number(item.count || 0),
+      values: days.map((day) => byDate.get(day) || 0),
+      person_id: item.person_id || null,
+    };
+  });
+}
+
+function renderCurvedTrendChart(targetId, legendId, {days, series, emptyText, ariaLabel}) {
+  const target = $(targetId);
+  const legend = $(legendId);
+  if (!target) return;
+  if (!days.length || !series.length) {
+    target.innerHTML = `<div class="trend-empty"><b>${esc(emptyText)}</b></div>`;
+    if (legend) legend.innerHTML = "";
+    return;
+  }
+  const width = 1000;
+  const height = 320;
+  const pad = {top: 22, right: 28, bottom: 54, left: 54};
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const maxValue = Math.max(1, ...series.flatMap((item) => (item.values || []).map(Number)));
+  const yMax = maxValue <= 4 ? Math.max(2, maxValue) : Math.ceil(maxValue / 4) * 4;
+  const gridSteps = Math.min(4, yMax);
+  const xAt = (index) => pad.left + (days.length === 1 ? plotWidth / 2 : index * plotWidth / (days.length - 1));
+  const yAt = (value) => pad.top + plotHeight - Math.min(yMax, Number(value || 0)) * plotHeight / yMax;
+  const grid = Array.from({length: gridSteps + 1}, (_, index) => {
+    const value = yMax * index / gridSteps;
+    const y = yAt(value);
+    return `<g><line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" class="trend-grid-line"/><text x="${pad.left - 12}" y="${y + 5}" class="trend-axis-label">${n(value)}</text></g>`;
+  }).join("");
+  const labelEvery = days.length > 10 ? 2 : 1;
+  const xLabels = days.map((day, index) => (
+    index % labelEvery === 0 || index === days.length - 1
+      ? `<text x="${xAt(index)}" y="${height - 18}" class="trend-axis-label trend-date-label">${esc(garayeShortDate(day))}</text>`
+      : ""
+  )).join("");
+  const lines = series.map((item, seriesIndex) => {
+    const color = GARAYE_LINE_PALETTE[seriesIndex % GARAYE_LINE_PALETTE.length];
+    const values = days.map((_, index) => Number((item.values || [])[index] || 0));
+    const points = values.map((value, index) => [xAt(index), yAt(value)]);
+    const dots = values.map((value, index) => `
+      <circle cx="${xAt(index)}" cy="${yAt(value)}" r="${value ? 3.8 : 2.2}" fill="${color}">
+        <title>${esc(item.name)} · ${esc(garayeShortDate(days[index]))}: ${n(value)}</title>
+      </circle>`).join("");
+    return `<g><path d="${catmullRomPath(points)}" fill="none" stroke="${color}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>${dots}</g>`;
+  }).join("");
+  target.innerHTML = `
+    <svg class="trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(ariaLabel || "نمودار منحنی")}">
+      ${grid}${xLabels}${lines}
+    </svg>`;
+  if (legend) {
+    legend.innerHTML = series.map((item, index) => `
+      <span class="trend-key">
+        <i class="trend-swatch" style="background:${GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length]}"></i>
+        <b>${esc(item.name)}</b>
+        <small>${n(item.total)}</small>
+      </span>`).join("");
+  }
+}
+
+function findPersonBySpeakerName(name) {
+  const key = String(name || "").trim();
+  if (!key) return null;
+  return (state.people || []).find((item) => item.full_name === key)
+    || (state.people || []).find((item) => String(item.aliases || "").split("|").map((part) => part.trim()).includes(key))
+    || null;
 }
 
 function renderGarayeWordCloud(words = state.garayeInsights?.word_cloud || []) {
@@ -823,7 +925,7 @@ function renderGarayeWordCloud(words = state.garayeInsights?.word_cloud || []) {
       state.garayeWordTrendWord = item.word;
       $("garayeWordTrendSelect").value = item.word;
       renderGarayeWordTrend();
-      $("garayeWordTrend").scrollIntoView({behavior: "smooth", block: "center"});
+      $("garayeWordShare")?.scrollIntoView({behavior: "smooth", block: "center"});
     });
   });
 }
@@ -846,16 +948,18 @@ async function loadGarayeInsights() {
   if ($("garayeTo").value.trim()) params.set("date_to_jalali", $("garayeTo").value.trim());
   if ($("garayeFromTime").value) params.set("time_from", $("garayeFromTime").value);
   if ($("garayeToTime").value) params.set("time_to", $("garayeToTime").value);
+  if (!state.people.length) {
+    try { state.people = await api("/admin/api/people"); } catch (_) {}
+  }
   const [data] = await Promise.all([
     api(`/admin/api/garaye-insights?${params}`),
     loadGarayeOverviewStats(),
   ]);
   state.garayeInsights = data;
-  const range = data.range || {};
   renderTopicTrend(data.topic_chart || {});
   renderGarayeWordCloud(data.word_cloud || []);
   observeGarayeWordCloud();
-  renderGarayeBars("garayeSpeakerTrends", data.speaker_trends, "هنوز گویندهٔ مشخصی در این بازه نیست.");
+  renderGarayeSpeakerTrends();
   renderGarayeBars("garayeAttentionTrend", data.high_attention?.subjects || [], "سوژهٔ اصلیِ پربازتاب نهایی‌شده‌ای در این بازه نیست.");
   const trendWords = data.word_trends || [];
   const selected = trendWords.some((item) => item.name === state.garayeWordTrendWord)
@@ -869,10 +973,55 @@ async function loadGarayeInsights() {
 }
 
 function renderGarayeWordTrend() {
-  const target = $("garayeWordTrend");
-  const trend = (state.garayeInsights?.word_trends || []).find((item) => item.name === state.garayeWordTrendWord);
-  const rows = (trend?.series || []).map((item) => ({...item, name: garayeDateLabel(item.date)}));
-  renderGarayeBars(target.id, rows, "برای این واژه در بازهٔ انتخابی روندی ثبت نشده است.");
+  const data = state.garayeInsights || {};
+  const totals = data.daily_word_totals || [];
+  const chartDays = totals.length
+    ? totals.map((item) => item.date)
+    : [...new Set((data.word_trends || []).flatMap((item) => (item.series || []).map((row) => row.date)))].sort();
+  const series = alignSeriesToDays(data.word_trends || [], chartDays);
+  renderCurvedTrendChart("garayeWordTrendChart", "garayeWordTrendLegend", {
+    days: chartDays,
+    series,
+    emptyText: "برای این بازه روند ابرواژگان ثبت نشده است.",
+    ariaLabel: "نمودار منحنی روند روزانه ابرواژگان",
+  });
+  const selected = series.find((item) => item.name === state.garayeWordTrendWord) || series[0];
+  const share = $("garayeWordShare");
+  if (!share) return;
+  if (!selected || !chartDays.length) {
+    share.innerHTML = `<div class="empty-mini">واژه‌ای برای نمایش سهم روزانه انتخاب نشده است.</div>`;
+    return;
+  }
+  const totalByDay = new Map(totals.map((item) => [item.date, Number(item.count || 0)]));
+  share.innerHTML = `<div class="garaye-share-caption">سهم «${esc(selected.name)}» از کل واژه‌های هر روز</div>` + chartDays.map((day, index) => {
+    const wordCount = Number(selected.values[index] || 0);
+    const dayTotal = totalByDay.get(day) || series.reduce((sum, item) => sum + Number(item.values[index] || 0), 0);
+    const percent = dayTotal ? Math.round((wordCount / dayTotal) * 1000) / 10 : 0;
+    return `<article class="garaye-share-row"><small>${esc(garayeShortDate(day))}</small><span class="garaye-share-track" title="${n(wordCount)} از ${n(dayTotal)}"><i style="width:${Math.max(percent, wordCount ? 2 : 0)}%"></i></span><b>${n(percent)}٪</b></article>`;
+  }).join("");
+}
+
+function renderGarayeSpeakerTrends() {
+  const data = state.garayeInsights || {};
+  const days = (data.daily_finalized || []).map((item) => item.date);
+  const series = alignSeriesToDays(data.speaker_trends || [], days);
+  renderCurvedTrendChart("garayeSpeakerChart", "garayeSpeakerLegend", {
+    days,
+    series,
+    emptyText: "هنوز گویندهٔ مشخصی در این بازه نیست.",
+    ariaLabel: "نمودار منحنی ترند گویندگان",
+  });
+  const box = $("garayeSpeakerPeople");
+  if (!box) return;
+  box.innerHTML = series.length ? series.map((item) => {
+    const person = item.person_id
+      ? (state.people || []).find((row) => Number(row.person_id) === Number(item.person_id))
+      : findPersonBySpeakerName(item.name);
+    const personId = person?.person_id || item.person_id;
+    const initials = String(item.name || "؟").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || "؟";
+    const avatar = `<span class="person-avatar">${personId ? `<img src="/admin/portraits/${personId}" alt="${esc(item.name)}" onerror="this.remove()">` : ""}<i>${esc(initials)}</i></span>`;
+    return `<article class="garaye-speaker-row">${avatar}<div><b>${esc(item.name)}</b><p>${esc(person?.position || person?.category || "گویندهٔ خبرهای نهایی")}</p></div><small>${n(item.total)} خبر</small></article>`;
+  }).join("") : `<div class="empty-mini">هنوز گویندهٔ مشخصی در این بازه نیست.</div>`;
 }
 
 function setGarayeRangePreset(preset, {load = false} = {}) {
@@ -914,11 +1063,16 @@ async function loadSources(silent = false) {
     const health = error
       ? `<br><span class="source-receipt-error" title="${esc(error)}">آخرین خطا: ${esc(error.length > 160 ? `${error.slice(0, 160)}…` : error)}</span>`
       : "";
+    const canEditSources = (state.me?.permissions || []).some((permission) => permission === "*" || permission === "sources.manage");
+    const titleEditor = canEditSources
+      ? `<div class="source-title-edit"><input data-source-title="${item.id}" value="${esc(item.title || item.username || "")}" placeholder="عنوان یا نام منبع"><button type="button" class="outline-button" onclick="saveSourceTitle(${item.id})">ثبت عنوان</button></div>`
+      : "";
     return `
     <article class="source-card">
       <div class="source-card-top"><div><h4>${esc(item.title || item.username || "منبع")}</h4><span class="status-pill ${Number(item.enabled) ? "approved" : "rejected"}">${Number(item.enabled) ? "فعال" : "غیرفعال"}</span></div>
       <button class="switch ${Number(item.enabled) ? "on" : "off"}" onclick="toggleSource(${item.id},${!Number(item.enabled)})">${Number(item.enabled) ? "روشن" : "خاموش"}</button></div>
       <p>${item.username ? `@${esc(item.username)}` : `شناسه: ${esc(item.chat_id)}`}<br>نوع: ${sourceTypeLabels[item.chat_type] || "منبع پایش"}<br>آخرین دریافت موفق: ${fdate(lastSuccess)}${health}</p>
+      ${titleEditor}
     </article>`;
   }).join("") : `<div class="empty-mini">هنوز منبعی ثبت نشده است.</div>`;
   $("crawlerChannels").value = (crawler.channels || []).join("\n");
@@ -948,6 +1102,17 @@ async function toggleSource(id, enabled) {
     await api(`/admin/api/sources/${id}`, {method: "PATCH", body: JSON.stringify({enabled})});
     toast("وضعیت منبع تغییر کرد.");
     await loadSources();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function saveSourceTitle(id) {
+  const input = document.querySelector(`[data-source-title="${id}"]`);
+  const title = input?.value.trim() || "";
+  if (!title) return toast("عنوان یا نام منبع را وارد کنید.", true);
+  try {
+    await api(`/admin/api/sources/${id}`, {method: "PATCH", body: JSON.stringify({title})});
+    toast("عنوان منبع به‌روزرسانی شد.");
+    await loadSources(true);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -1434,9 +1599,96 @@ function hideQuickRegistryPrompt() {
 }
 
 function hideDeskSubjectEditor() {
-  $("deskSubjectEditor").classList.add("hidden");
-  $("deskPersonFields").classList.add("hidden");
-  $("deskEventFields").classList.add("hidden");
+  $("deskSubjectEditor")?.classList.add("hidden");
+  $("deskPersonFields")?.classList.add("hidden");
+  $("deskEventFields")?.classList.add("hidden");
+  $("deskNewPersonBox")?.classList.add("hidden");
+  $("deskPersonMetaFields")?.classList.add("hidden");
+  closeDeskPersonOptions();
+}
+
+function registryPeople() {
+  return (state.people || []).filter((item) => Number(item.active) !== 0);
+}
+
+function closeDeskPersonOptions() {
+  $("deskPersonOptions")?.classList.add("hidden");
+}
+
+function renderDeskPersonOptions(query = "") {
+  const box = $("deskPersonOptions");
+  if (!box) return;
+  const needle = String(query || "").trim().toLowerCase();
+  const people = registryPeople().filter((item) => {
+    if (!needle) return true;
+    const hay = `${item.full_name} ${item.position || ""} ${item.category || ""} ${item.aliases || ""}`.toLowerCase();
+    return hay.includes(needle);
+  });
+  const selectedId = $("deskPersonId")?.value || "";
+  const selectedNew = $("deskPersonMode")?.value === "new";
+  box.innerHTML = [
+    `<button type="button" class="desk-combobox-option desk-combobox-new ${selectedNew ? "active" : ""}" data-desk-person="new">شخص جدید</button>`,
+    ...people.slice(0, 50).map((item) => {
+      const initials = String(item.full_name || "؟").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || "؟";
+      return `<button type="button" class="desk-combobox-option ${String(item.person_id) === selectedId ? "active" : ""}" data-desk-person="${item.person_id}">
+        <span class="person-avatar"><img src="/admin/portraits/${item.person_id}" alt="" onerror="this.remove()"><i>${esc(initials)}</i></span>
+        <span><b>${esc(item.full_name)}</b><small>${esc([item.position, item.category].filter(Boolean).join(" · ") || "بدون سمت")}</small></span>
+      </button>`;
+    }),
+  ].join("");
+  box.classList.remove("hidden");
+  box.querySelectorAll("[data-desk-person]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      applyDeskPersonChoice(button.dataset.deskPerson, {fromUser: true});
+    });
+  });
+}
+
+function markDeskSubjectUnconfirmed() {
+  state.deskSubjectConfirmed = false;
+  const hint = $("deskSubjectConfirmHint");
+  if (hint) hint.textContent = "برای ذخیره اصلاحات، ثبت مشخصات را بزنید.";
+}
+
+function markDeskSubjectConfirmed(message = "مشخصات ثبت شد.") {
+  state.deskSubjectConfirmed = true;
+  const hint = $("deskSubjectConfirmHint");
+  if (hint) hint.textContent = message;
+}
+
+function applyDeskPersonChoice(value, {fromUser = true} = {}) {
+  const search = $("deskPersonSearch");
+  if (fromUser && search) search.dataset.touched = "1";
+  if (value === "new") {
+    $("deskPersonMode").value = "new";
+    $("deskPersonId").value = "";
+    if (search) search.value = "شخص جدید";
+    $("deskNewPersonBox")?.classList.remove("hidden");
+    $("deskPersonMetaFields")?.classList.remove("hidden");
+    if ($("deskNewPersonName") && !$("deskNewPersonName").dataset.touched) {
+      $("deskNewPersonName").value = $("finalizationSpeaker")?.value || "";
+    }
+    $("deskPersonName").value = $("deskNewPersonName")?.value.trim() || "";
+  } else {
+    const person = registryPeople().find((item) => String(item.person_id) === String(value));
+    if (!person) return;
+    $("deskPersonMode").value = "existing";
+    $("deskPersonId").value = String(person.person_id);
+    $("deskPersonName").value = person.full_name;
+    if (search) search.value = person.full_name;
+    $("deskNewPersonBox")?.classList.add("hidden");
+    $("deskPersonMetaFields")?.classList.remove("hidden");
+    if ($("deskPersonPosition") && !$("deskPersonPosition").dataset.touched) {
+      $("deskPersonPosition").value = person.position || "";
+    }
+    if ($("deskPersonCategory") && !$("deskPersonCategory").dataset.touched) {
+      fillPersonCategorySelects(person.category || "");
+      $("deskPersonCategory").value = person.category || "";
+    }
+  }
+  closeDeskPersonOptions();
+  if (fromUser) markDeskSubjectUnconfirmed();
 }
 
 function renderDeskSubjectEditor() {
@@ -1451,9 +1703,11 @@ function renderDeskSubjectEditor() {
     const row = state.analyzedMessages.find((item) => Number(item.id) === eventMessageId) || state.analyzedMessages[0];
     const event = row?.event || {};
     $("deskSubjectHeading").textContent = "اصلاح مشخصات رویداد";
-    $("deskSubjectHint").textContent = "عنوان، محل و زمان رویداد را پیش از تدوین هر پیام بازبینی و در صورت نیاز اصلاح کنید.";
+    $("deskSubjectHint").textContent = "عنوان، محل و زمان رویداد را بازبینی کنید و سپس ثبت مشخصات را بزنید.";
     $("deskPersonFields").classList.add("hidden");
     $("deskEventFields").classList.remove("hidden");
+    $("deskNewPersonBox")?.classList.add("hidden");
+    $("deskPersonMetaFields")?.classList.add("hidden");
     if (!$("deskEventTitle").dataset.touched) {
       $("deskEventTitle").value = event.title || row?.analysis_event_title || row?.analysis_main_subject || "";
     }
@@ -1466,7 +1720,7 @@ function renderDeskSubjectEditor() {
     return;
   }
   const speakerRecord = (state.analysisFilters.speakers || []).find((item) => item.speaker_name === speaker);
-  const person = state.people.find((item) => item.full_name === speaker);
+  const person = findPersonBySpeakerName(speaker);
   const tags = state.analyzedMessages.flatMap((item) => item.tags || []);
   const positionCounts = new Map();
   for (const tag of tags) {
@@ -1475,10 +1729,19 @@ function renderDeskSubjectEditor() {
   }
   const analyzedPosition = [...positionCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "";
   $("deskSubjectHeading").textContent = "اصلاح مشخصات گوینده";
-  $("deskSubjectHint").textContent = "نام، سمت و دستهٔ فرد انتخاب‌شده را اصلاح کنید؛ سپس برای هر پیام دکمهٔ مناسب را بزنید.";
+  $("deskSubjectHint").textContent = "گوینده را از شناسنامه جست‌وجو کنید یا «شخص جدید» را بسازید؛ سپس ثبت مشخصات را بزنید.";
   $("deskEventFields").classList.add("hidden");
   $("deskPersonFields").classList.remove("hidden");
-  if (!$("deskPersonName").dataset.touched) $("deskPersonName").value = speaker || "";
+  if (!$("deskPersonMode")?.value) {
+    if (person) applyDeskPersonChoice(String(person.person_id), {fromUser: false});
+    else applyDeskPersonChoice("new", {fromUser: false});
+  } else if ($("deskPersonMode").value === "new") {
+    $("deskNewPersonBox")?.classList.remove("hidden");
+    $("deskPersonMetaFields")?.classList.remove("hidden");
+  } else {
+    $("deskNewPersonBox")?.classList.add("hidden");
+    $("deskPersonMetaFields")?.classList.remove("hidden");
+  }
   if (!$("deskPersonPosition").dataset.touched) {
     $("deskPersonPosition").value = analyzedPosition || person?.position || speakerRecord?.position || "";
   }
@@ -1488,12 +1751,91 @@ function renderDeskSubjectEditor() {
 }
 
 function resetDeskSubjectEditorTouch() {
-  ["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime"].forEach((id) => {
+  ["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime", "deskNewPersonName", "deskPersonSearch", "deskPersonId", "deskPersonMode"].forEach((id) => {
     const field = $(id);
     if (!field) return;
     delete field.dataset.touched;
-    field.value = "";
+    if (field.type === "hidden" || field.tagName === "INPUT" || field.tagName === "SELECT") field.value = "";
   });
+  state.deskSubjectConfirmed = false;
+  closeDeskPersonOptions();
+  $("deskNewPersonBox")?.classList.add("hidden");
+  $("deskPersonMetaFields")?.classList.add("hidden");
+  const hint = $("deskSubjectConfirmHint");
+  if (hint) hint.textContent = "";
+}
+
+function canManagePeople() {
+  return (state.me?.permissions || []).some((permission) => permission === "*" || permission === "people.manage");
+}
+
+async function confirmDeskSubject() {
+  const eventMessageId = Number($("finalizationEvent").value) || null;
+  if (eventMessageId) {
+    ["deskEventTitle", "deskEventLocation", "deskEventTime"].forEach((id) => {
+      if ($(id)) $(id).dataset.touched = "1";
+    });
+    markDeskSubjectConfirmed("مشخصات رویداد ثبت شد.");
+    toast("مشخصات رویداد ثبت شد.");
+    return;
+  }
+  const mode = $("deskPersonMode")?.value;
+  try {
+    if (mode === "new") {
+      const name = $("deskNewPersonName")?.value.trim() || "";
+      if (!name) return toast("نام شخص جدید را وارد کنید.", true);
+      $("deskPersonName").value = name;
+      if (canManagePeople()) {
+        const saved = await api("/admin/api/people", {
+          method: "POST",
+          body: JSON.stringify({
+            full_name: name,
+            position: $("deskPersonPosition")?.value.trim() || null,
+            category: $("deskPersonCategory")?.value.trim() || null,
+            registry_status: "inside",
+            active: true,
+            aliases: [],
+            replace_aliases: true,
+          }),
+        });
+        await loadReferenceData();
+        applyDeskPersonChoice(String(saved.person_id), {fromUser: false});
+        markDeskSubjectConfirmed("شخص جدید در شناسنامه ثبت شد.");
+        toast("شخص جدید در شناسنامه ثبت شد.");
+        return;
+      }
+      markDeskSubjectConfirmed("مشخصات برای تدوین ثبت شد.");
+      toast("مشخصات برای تدوین ثبت شد.");
+      return;
+    }
+    const personId = Number($("deskPersonId")?.value);
+    const person = state.people.find((item) => Number(item.person_id) === personId);
+    if (!person) return toast("یک گوینده از فهرست شناسنامه انتخاب کنید یا شخص جدید بسازید.", true);
+    $("deskPersonName").value = person.full_name;
+    if (canManagePeople()) {
+      await api("/admin/api/people", {
+        method: "POST",
+        body: JSON.stringify({
+          person_id: personId,
+          full_name: person.full_name,
+          position: $("deskPersonPosition")?.value.trim() || null,
+          category: $("deskPersonCategory")?.value.trim() || null,
+          registry_status: person.registry_status || "inside",
+          active: Number(person.active) !== 0,
+          replace_aliases: false,
+          priority: Number(person.priority || 100),
+        }),
+      });
+      await loadReferenceData();
+      markDeskSubjectConfirmed("اصلاحات شناسنامه ثبت شد.");
+      toast("اصلاحات شناسنامه ثبت شد.");
+      return;
+    }
+    markDeskSubjectConfirmed("مشخصات برای تدوین ثبت شد.");
+    toast("مشخصات برای تدوین ثبت شد.");
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 function renderQuickRegistryPrompt() {
@@ -1695,7 +2037,8 @@ async function createDraftFromAnalysis(options = {}) {
   const deskEventTitle = $("deskEventTitle")?.value.trim() || "";
   const deskEventLocation = $("deskEventLocation")?.value.trim() || "";
   const deskEventTime = $("deskEventTime")?.value.trim() || "";
-  const deskPersonName = $("deskPersonName")?.value.trim() || speakerFilter;
+  const deskPersonId = Number($("deskPersonId")?.value) || null;
+  const deskPersonName = $("deskPersonName")?.value.trim() || $("deskNewPersonName")?.value.trim() || speakerFilter;
   const deskPersonPosition = $("deskPersonPosition")?.value.trim() || "";
   const deskPersonCategory = $("deskPersonCategory")?.value.trim() || "";
   const topicName = $("finalizationGeneralTopic").value
@@ -1703,7 +2046,9 @@ async function createDraftFromAnalysis(options = {}) {
     || [...topicCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0]
     || "نامشخص";
   const speakerName = isEvent ? null : (deskPersonName || speakerFilter);
-  const person = state.people.find((item) => item.full_name === speakerName);
+  const person = isEvent
+    ? null
+    : (deskPersonId ? state.people.find((item) => Number(item.person_id) === deskPersonId) : state.people.find((item) => item.full_name === speakerName));
   const topic = state.topics.find((item) => item.name === topicName);
   const positionCounts = new Map();
   for (const item of selected) {
@@ -2887,9 +3232,10 @@ function startBotQueueRecoveryPolling() {
 }
 
 async function loadSystem() {
-  const [data, recovery] = await Promise.all([
+  const [data, recovery, gapgpt] = await Promise.all([
     api("/admin/api/system"),
     api("/admin/api/crawler/recovery"),
+    api("/admin/api/system/gapgpt-status").catch((error) => ({ok: false, error: error.message, groups: []})),
   ]);
   const db = data.database || {}, config = data.configuration || {}, counts = data.stats?.counts || {};
   $("systemMetrics").innerHTML = [
@@ -2933,6 +3279,88 @@ async function loadSystem() {
   $("connectionLabel").textContent = String(db.quick_check || "").toLowerCase() === "ok" ? "سامانه در دسترس است" : "نیازمند بررسی";
   renderCrawlerRecoveryStatus(recovery);
   renderLiveUpdateStatus(data.update || {version: data.version});
+  renderGapgptStatus(gapgpt);
+}
+
+function gapgptStatusLabel(status) {
+  return {operational: "سالم", degraded: "کاهش کیفیت", incident: "اختلال", unknown: "نامشخص"}[status] || status || "نامشخص";
+}
+
+function renderGapgptStatus(payload) {
+  const box = $("gapgptStatus");
+  if (!box) return;
+  if (!payload?.ok) {
+    box.innerHTML = `<div class="empty-mini">خواندن صفحهٔ وضعیت گپ‌جی‌پی‌تی ممکن نشد. ${esc(payload?.error || "")}</div>`;
+    return;
+  }
+  const groups = payload.groups || [];
+  const overall = payload.overall_status || "unknown";
+  box.innerHTML = `
+    <div class="gapgpt-overall">
+      <div><b>وضعیت کلی APIها</b><p style="margin:4px 0 0;color:var(--muted);font-size:12px">آخرین به‌روزرسانی منبع: ${esc(payload.generated_at ? fdate(payload.generated_at) : "—")}</p></div>
+      <span class="gapgpt-status-pill ${esc(overall)}">${esc(gapgptStatusLabel(overall))}</span>
+    </div>
+    ${groups.map((group) => {
+      const children = (group.children || []).map((child) => `
+        <div class="gapgpt-child">
+          <div class="panel-heading" style="margin-bottom:8px"><div><h4>${esc(child.name)}</h4><p>${esc(child.description || "")}</p></div><span class="gapgpt-status-pill ${esc(child.status)}">${esc(gapgptStatusLabel(child.status))}</span></div>
+          ${renderGapgptProbes(child.probes || [])}
+        </div>`).join("");
+      return `<article class="gapgpt-group">
+        <div class="panel-heading"><div><h4>${esc(group.name)}</h4><p>${esc(group.description || "")}</p></div><span class="gapgpt-status-pill ${esc(group.status)}">${esc(gapgptStatusLabel(group.status))}</span></div>
+        ${children || renderGapgptProbes(group.probes || [])}
+      </article>`;
+    }).join("")}`;
+}
+
+function renderGapgptProbes(probes) {
+  return `<div class="gapgpt-probes">${(probes || []).map((item) => `
+    <article class="gapgpt-probe">
+      <div>
+        <b>${esc(item.name || item.id)}</b>
+        <small>${esc(item.title || "")}${item.latency_ms != null ? ` · ${n(item.latency_ms)} میلی‌ثانیه` : ""}${item.checked_at ? ` · ${fdate(item.checked_at)}` : ""}</small>
+        <div class="gapgpt-uptime" aria-hidden="true">${(item.history || []).map((row) => `<i class="${esc(row.status || "unknown")}" title="${esc(row.date || "")} · ${esc(gapgptStatusLabel(row.status))}"></i>`).join("")}</div>
+      </div>
+      <span class="gapgpt-status-pill ${esc(item.status || "unknown")}">${esc(gapgptStatusLabel(item.status))}</span>
+    </article>`).join("")}</div>`;
+}
+
+async function loadApiKeys() {
+  const data = await api("/admin/api/api-keys");
+  renderApiKeyRows(data.items || []);
+}
+
+function renderApiKeyRows(items) {
+  const rows = $("apiKeyRows");
+  if (!rows) return;
+  rows.innerHTML = items.length ? items.map((item) => {
+    const revoked = Boolean(item.revoked_at);
+    return `<tr class="${revoked ? "inactive-row" : ""}"><td><b>${esc(item.name)}</b></td><td dir="ltr">${esc(item.token_prefix)}…</td><td>${fdate(item.created_at)}</td><td>${item.last_used_at ? fdate(item.last_used_at) : "—"}</td><td><span class="status-pill ${revoked ? "rejected" : "approved"}">${revoked ? "باطل‌شده" : "فعال"}</span></td><td>${revoked ? "" : `<button class="text-button danger-text" type="button" onclick="revokeApiKey(${item.api_key_id})">ابطال</button>`}</td></tr>`;
+  }).join("") : `<tr><td colspan="6">هنوز کلیدی ساخته نشده است.</td></tr>`;
+}
+
+function showCreatedApiKey(payload) {
+  const box = $("apiKeySecretBox");
+  if (!box) return;
+  box.classList.remove("hidden");
+  box.innerHTML = `<b>کلید فقط همین یک‌بار نمایش داده می‌شود.</b><code id="apiKeySecretValue">${esc(payload.token)}</code><div class="button-row"><button type="button" class="outline-button" id="copyApiKey">کپی کلید</button></div>`;
+  $("copyApiKey")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(payload.token);
+      toast("کلید در حافظه کپی شد.");
+    } catch (_) {
+      toast("کپی خودکار ممکن نشد؛ کلید را دستی کپی کنید.", true);
+    }
+  });
+}
+
+async function revokeApiKey(id) {
+  if (!confirm("این کلید باطل شود؟ فراخوانی‌های بعدی با آن رد می‌شود.")) return;
+  try {
+    await api(`/admin/api/api-keys/${id}`, {method: "DELETE"});
+    toast("کلید باطل شد.");
+    await loadApiKeys();
+  } catch (error) { toast(error.message, true); }
 }
 
 function renderLiveUpdateStatus(payload, extraMessage = "") {
@@ -3594,8 +4022,22 @@ $("finalizationEvent").addEventListener("change", () => {
 });
 $("finalizationGeneralTopic").addEventListener("change", () => loadAnalyzedMessages().catch((error) => toast(error.message, true)));
 $("finalizationSpecificTopic").addEventListener("change", () => loadAnalyzedMessages().catch((error) => toast(error.message, true)));
-["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime"].forEach((id) => {
-  $(id)?.addEventListener("input", (event) => { event.currentTarget.dataset.touched = "1"; });
+["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime", "deskNewPersonName"].forEach((id) => {
+  $(id)?.addEventListener("input", (event) => {
+    event.currentTarget.dataset.touched = "1";
+    if (id === "deskNewPersonName") $("deskPersonName").value = event.currentTarget.value.trim();
+    markDeskSubjectUnconfirmed();
+  });
+  $(id)?.addEventListener("change", () => markDeskSubjectUnconfirmed());
+});
+$("deskPersonSearch")?.addEventListener("focus", () => renderDeskPersonOptions($("deskPersonSearch").value));
+$("deskPersonSearch")?.addEventListener("input", (event) => {
+  event.currentTarget.dataset.touched = "1";
+  renderDeskPersonOptions(event.currentTarget.value);
+});
+$("confirmDeskSubject")?.addEventListener("click", () => confirmDeskSubject().catch((error) => toast(error.message, true)));
+document.addEventListener("click", (event) => {
+  if (!$("deskPersonCombobox")?.contains(event.target)) closeDeskPersonOptions();
 });
   ["finalizationDateFrom", "finalizationTimeFrom", "finalizationDateTo", "finalizationTimeTo"].forEach((id) => {
     $(id).addEventListener("change", invalidateFinalizationWindow);
@@ -3833,6 +4275,18 @@ $("backupNow").addEventListener("click", async () => {
   try { await api("/admin/api/backup", {method: "POST"}); toast("نسخه پشتیبان با موفقیت ساخته شد."); await loadSystem(); }
   catch (error) { toast(error.message, true); }
 });
+$("apiKeyForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("apiKeyName")?.value.trim();
+  if (!name) return toast("نام کلید را وارد کنید.", true);
+  try {
+    const created = await api("/admin/api/api-keys", {method: "POST", body: JSON.stringify({name})});
+    $("apiKeyName").value = "";
+    showCreatedApiKey(created);
+    await loadApiKeys();
+    toast("کلید ساخته شد؛ مقدار کامل را همین حالا کپی کنید.");
+  } catch (error) { toast(error.message, true); }
+});
 document.querySelectorAll("[data-draft-filter]").forEach((item) => item.addEventListener("click", () => {
   document.querySelectorAll("[data-draft-filter]").forEach((button) => button.classList.remove("active"));
   item.classList.add("active"); state.draftFilter = item.dataset.draftFilter; loadDrafts();
@@ -3849,6 +4303,8 @@ window.discardMessageFromDesk = discardMessageFromDesk;
 window.correctAnalyzedSpeaker = correctAnalyzedSpeaker;
 window.viewPerson = viewPerson;
 window.openDraft = openDraft; window.restoreDraftVersion = restoreDraftVersion; window.toggleSource = toggleSource;
+window.saveSourceTitle = saveSourceTitle;
+window.revokeApiKey = revokeApiKey;
 $("loadMoreStream")?.addEventListener("click", () => loadStream({append: true}).catch((error) => toast(error.message, true)));
 $("currentUser")?.addEventListener("click", () => showPage("portal"));
 document.querySelectorAll(".quick-start-nav").forEach((item) => item.addEventListener("click", () => showPage(item.dataset.page)));

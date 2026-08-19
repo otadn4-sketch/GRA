@@ -17,6 +17,7 @@ from .auth import (
     VALID_ROLES,
     AdminPrincipal,
     hash_password,
+    new_api_token,
     new_session_token,
     token_digest,
     verify_password,
@@ -1221,6 +1222,20 @@ CREATE TABLE IF NOT EXISTS short_links (
     updated_at TEXT NOT NULL,
     FOREIGN KEY(draft_id) REFERENCES editorial_drafts(draft_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    api_key_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at TEXT,
+    FOREIGN KEY(user_id) REFERENCES admin_users(user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_api_keys_user
+ON api_keys(user_id, revoked_at);
 """
 
 
@@ -1989,6 +2004,85 @@ class Database:
             full_name=str(row["full_name"]),
             role=str(row["role"]),
         )
+
+    async def principal_from_api_key(self, token: str | None) -> AdminPrincipal | None:
+        raw = str(token or "").strip()
+        if not raw:
+            return None
+        row = await self._fetchone(
+            """
+            SELECT k.api_key_id,u.user_id,u.username,u.full_name,u.role,u.active
+            FROM api_keys k JOIN admin_users u ON u.user_id=k.user_id
+            WHERE k.token_hash=? AND k.revoked_at IS NULL
+            """,
+            (token_digest(raw),),
+        )
+        if not row or not int(row.get("active") or 0):
+            return None
+        await self._execute(
+            "UPDATE api_keys SET last_used_at=? WHERE api_key_id=?",
+            (utc_now(), int(row["api_key_id"])),
+        )
+        return AdminPrincipal(
+            user_id=int(row["user_id"]),
+            username=str(row["username"]),
+            full_name=str(row["full_name"]),
+            role=str(row["role"]),
+        )
+
+    async def list_api_keys(self, user_id: int) -> list[dict[str, Any]]:
+        return await self._fetchall(
+            """
+            SELECT api_key_id,name,token_prefix,created_at,last_used_at,revoked_at
+            FROM api_keys
+            WHERE user_id=?
+            ORDER BY CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END, created_at DESC
+            """,
+            (int(user_id),),
+        )
+
+    async def create_api_key(self, user_id: int, name: str) -> dict[str, Any]:
+        title = " ".join(str(name or "").split())
+        if not title:
+            raise ValueError("نام کلید را وارد کنید.")
+        if len(title) > 80:
+            raise ValueError("نام کلید نباید بیشتر از ۸۰ نویسه باشد.")
+        token = new_api_token()
+        created = utc_now()
+        key_id = await self._execute(
+            """
+            INSERT INTO api_keys(user_id,name,token_prefix,token_hash,created_at)
+            VALUES (?,?,?,?,?)
+            """,
+            (int(user_id), title, token[:12], token_digest(token), created),
+        )
+        return {
+            "api_key_id": int(key_id),
+            "name": title,
+            "token": token,
+            "token_prefix": token[:12],
+            "created_at": created,
+            "last_used_at": None,
+            "revoked_at": None,
+        }
+
+    async def revoke_api_key(self, user_id: int, api_key_id: int) -> bool:
+        row = await self._fetchone(
+            """
+            SELECT api_key_id,revoked_at FROM api_keys
+            WHERE api_key_id=? AND user_id=?
+            """,
+            (int(api_key_id), int(user_id)),
+        )
+        if not row:
+            return False
+        if row.get("revoked_at"):
+            return True
+        await self._execute(
+            "UPDATE api_keys SET revoked_at=? WHERE api_key_id=? AND user_id=?",
+            (utc_now(), int(api_key_id), int(user_id)),
+        )
+        return True
 
     async def revoke_admin_session(self, token: str | None) -> None:
         if token:
@@ -4351,6 +4445,19 @@ class Database:
                 attention_subject_days.setdefault(subject, Counter())[day_key] += 1
 
         word_trends = ranked(word_counts, word_days, 24)
+        daily_word_totals: Counter[str] = Counter()
+        for buckets in word_days.values():
+            daily_word_totals.update(buckets)
+        people_by_name = {
+            normalize_persian(str(row.get("full_name") or "")).strip(): int(row["person_id"])
+            for row in await self._fetchall(
+                "SELECT person_id,full_name FROM people WHERE merged_into IS NULL"
+            )
+            if str(row.get("full_name") or "").strip()
+        }
+        speaker_trends = ranked(speaker_counts, speaker_days, 10)
+        for item in speaker_trends:
+            item["person_id"] = people_by_name.get(item["name"])
 
         return {
             "range": {
@@ -4366,6 +4473,10 @@ class Database:
             ],
             "word_cloud": ranked_word_cloud(word_counts, limit=42),
             "word_trends": word_trends,
+            "daily_word_totals": [
+                {"date": day, "count": int(daily_word_totals[day])}
+                for day in active_days
+            ],
             "topic_chart": {
                 "days": active_days,
                 "series": [
@@ -4383,7 +4494,7 @@ class Database:
                 "window_days": (end_day - start_day).days + 1,
                 "timezone": "Asia/Tehran",
             },
-            "speaker_trends": ranked(speaker_counts, speaker_days, 10),
+            "speaker_trends": speaker_trends,
             "high_attention": {
                 "subjects": ranked(
                     attention_subject_counts, attention_subject_days, 10
