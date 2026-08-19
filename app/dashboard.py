@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 from openpyxl import load_workbook
@@ -30,7 +30,16 @@ from .backup import create_backup
 from .bale import BaleAPIError, BaleClient
 from .bulletin_cleanup import bulletin_run_directory, remove_bulletin_run_directory
 from .config import Settings
-from .db import Database, EditorialDraftConflictError, comparable_utc_iso, eitan_axis_public, message_media_assets, parse_eitan_upload
+from .db import (
+    BALE_MEDIA_MAX_BYTES,
+    Database,
+    EditorialDraftConflictError,
+    comparable_utc_iso,
+    eitan_axis_public,
+    message_media_assets,
+    parse_eitan_upload,
+    resolve_media_mime,
+)
 from .gapgpt_status import fetch_gapgpt_status
 from .live_update import apply_update_zip, current_version, last_update_status, request_reload
 from .scheduler import BulletinScheduler
@@ -1569,9 +1578,8 @@ def create_dashboard_router(
     async def message_media(
         message_id: int,
         media_index: int,
-        request: Request,
         _: str = Depends(admin_identity),
-    ) -> StreamingResponse:
+    ) -> Response:
         if bale is None or not bale.enabled:
             raise HTTPException(503, "اتصال بله برای دریافت رسانه در دسترس نیست.")
         item = await db.get_message(message_id)
@@ -1587,59 +1595,20 @@ def create_dashboard_router(
         if asset.get("too_large"):
             raise HTTPException(413, "حجم این فایل از سقف ۲۰ مگابایت بله بیشتر است.")
         try:
-            info = await bale.get_file(file_id)
+            payload, upstream_mime, file_path = await bale.download_by_file_id(file_id)
         except BaleAPIError as exc:
             raise HTTPException(502, f"دریافت فایل از بله ممکن نشد: {exc}") from exc
-        file_path = str(info.get("file_path") or "").strip()
-        if not file_path:
-            raise HTTPException(404, "مسیر فایل از بله برنگشت.")
-        upstream_headers: dict[str, str] = {}
-        range_header = request.headers.get("range")
-        if range_header:
-            upstream_headers["Range"] = range_header
-        try:
-            upstream = await bale.open_file_stream(file_path, headers=upstream_headers or None)
-        except BaleAPIError as exc:
-            raise HTTPException(502, f"دانلود فایل از بله ممکن نشد: {exc}") from exc
-        if upstream.status_code >= 400:
-            await upstream.aclose()
-            raise HTTPException(502, "دانلود فایل از بله ناموفق بود.")
-        mime = (
-            str(asset.get("mime_type") or "").strip()
-            or str(upstream.headers.get("content-type") or "").split(";")[0].strip()
-            or "application/octet-stream"
-        )
-        headers: dict[str, str] = {
-            "Cache-Control": "private, max-age=300",
-            "X-Content-Type-Options": "nosniff",
-        }
-        accept_ranges = upstream.headers.get("accept-ranges")
-        if accept_ranges:
-            headers["Accept-Ranges"] = accept_ranges
-        elif range_header or mime.startswith(("video/", "audio/")):
-            headers["Accept-Ranges"] = "bytes"
-        if upstream.headers.get("content-range"):
-            headers["Content-Range"] = upstream.headers["content-range"]
-        if upstream.headers.get("content-length"):
-            headers["Content-Length"] = upstream.headers["content-length"]
+        if len(payload) > BALE_MEDIA_MAX_BYTES + 1024:
+            raise HTTPException(413, "حجم این فایل از سقف ۲۰ مگابایت بله بیشتر است.")
+        if not payload:
+            raise HTTPException(502, "فایل دریافتی از بله خالی بود.")
+        mime = resolve_media_mime(asset, file_path=file_path, upstream_mime=upstream_mime)
+        headers = {"Cache-Control": "private, max-age=300"}
         file_name = str(asset.get("file_name") or "").strip()
         if file_name:
             ascii_name = re.sub(r"[^A-Za-z0-9._-]+", "_", file_name).strip("._")[:80] or "media"
             headers["Content-Disposition"] = f'inline; filename="{ascii_name}"'
-
-        async def iterator():
-            try:
-                async for chunk in upstream.aiter_bytes(64 * 1024):
-                    yield chunk
-            finally:
-                await upstream.aclose()
-
-        return StreamingResponse(
-            iterator(),
-            status_code=upstream.status_code,
-            media_type=mime,
-            headers=headers,
-        )
+        return Response(content=payload, media_type=mime, headers=headers)
 
     @router.put("/admin/api/messages/{message_id}/rating")
     async def save_message_rating(

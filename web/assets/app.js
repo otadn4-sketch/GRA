@@ -1471,6 +1471,17 @@ function messageMediaItems(item) {
   return Array.isArray(item?.media_items) ? item.media_items : [];
 }
 
+function handleStreamMediaError(el) {
+  const node = el?.closest?.(".message-media-photo, .message-media-audio") || el;
+  if (!node || node.dataset.mediaFailed === "1") return;
+  if (node.dataset) node.dataset.mediaFailed = "1";
+  const label = el?.getAttribute?.("data-media-label") || el?.getAttribute?.("alt") || "رسانه";
+  const note = document.createElement("div");
+  note.className = "message-media-note";
+  note.textContent = `بارگذاری «${label}» ناموفق بود.`;
+  node.replaceWith(note);
+}
+
 function renderMessageMedia(item) {
   const assets = messageMediaItems(item);
   if (!assets.length) return "";
@@ -1490,14 +1501,16 @@ function renderMessageMedia(item) {
       return `<div class="message-media-note">«${esc(label)}» بزرگ‌تر از سقف ۲۰ مگابایت بله است و پخش نمی‌شود.</div>`;
     }
     if (asset.play === "image") {
-      return `<a class="message-media-photo" href="${esc(asset.url)}" target="_blank" rel="noopener"><img src="${esc(asset.url)}" alt="${esc(asset.file_name || label)}" loading="lazy"></a>`;
+      return `<a class="message-media-photo" href="${esc(asset.url)}" target="_blank" rel="noopener"><img src="${esc(asset.url)}" alt="${esc(asset.file_name || label)}" data-media-label="${esc(label)}" loading="lazy" onerror="handleStreamMediaError(this)"></a>`;
     }
     if (asset.play === "video") {
-      return `<video class="message-media-video" controls preload="none" playsinline src="${esc(asset.url)}"></video>`;
+      const mime = esc(asset.mime_type || "video/mp4");
+      return `<video class="message-media-video" controls preload="metadata" playsinline data-media-label="${esc(label)}" onerror="handleStreamMediaError(this)"><source src="${esc(asset.url)}" type="${mime}" onerror="handleStreamMediaError(this.closest('video') || this)"></video>`;
     }
     if (asset.play === "audio") {
       const duration = formatMediaDuration(asset.duration);
-      return `<div class="message-media-audio"><span>${esc(asset.file_name || label)}${duration ? ` · ${duration}` : ""}</span><audio controls preload="none" src="${esc(asset.url)}"></audio></div>`;
+      const mime = esc(asset.mime_type || "audio/mpeg");
+      return `<div class="message-media-audio"><span>${esc(asset.file_name || label)}${duration ? ` · ${duration}` : ""}</span><audio controls preload="metadata" data-media-label="${esc(label)}" onerror="handleStreamMediaError(this)"><source src="${esc(asset.url)}" type="${mime}" onerror="handleStreamMediaError(this.closest('audio') || this)"></audio></div>`;
     }
     return `<a class="outline-button" href="${esc(asset.url)}" target="_blank" rel="noopener">دانلود ${esc(label)}</a>`;
   }).join("")}</div>`;
@@ -4615,6 +4628,7 @@ document.querySelectorAll("[data-draft-origin]").forEach((item) => item.addEvent
 document.querySelectorAll("[data-close-dialog]").forEach((item) => item.addEventListener("click", () => item.closest("dialog").close()));
 
 window.selectMessage = selectMessage; window.selectVisibleMessages = selectVisibleMessages; window.clearMessageSelection = clearMessageSelection; window.openMessage = openMessage;
+window.handleStreamMediaError = handleStreamMediaError;
 window.selectAnalyzedMessage = selectAnalyzedMessage; window.searchMessageInGoogle = searchMessageInGoogle;
 window.discardMessageFromDesk = discardMessageFromDesk;
 window.correctAnalyzedSpeaker = correctAnalyzedSpeaker;

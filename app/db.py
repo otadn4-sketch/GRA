@@ -451,12 +451,56 @@ _MEDIA_KIND_MIME = {
     "audio": "audio/mpeg",
     "voice": "audio/ogg",
 }
+_MEDIA_SUFFIX_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".ogg": "application/ogg",
+    ".ogv": "video/ogg",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".oga": "audio/ogg",
+    ".wav": "audio/wav",
+    ".opus": "audio/ogg",
+}
+
+
+def _media_text(item: dict[str, Any] | None, *keys: str) -> str:
+    if not isinstance(item, dict):
+        return ""
+    for key in keys:
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _media_int(item: dict[str, Any] | None, *keys: str) -> int:
+    if not isinstance(item, dict):
+        return 0
+    for key in keys:
+        value = item.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
 
 
 def _media_file_id(item: dict[str, Any] | None) -> str:
-    if not isinstance(item, dict):
-        return ""
-    return str(item.get("file_id") or "").strip()
+    return _media_text(item, "file_id", "fileId", "fileID")
 
 
 def _largest_photo_item(items: Any) -> dict[str, Any] | None:
@@ -476,8 +520,8 @@ def _largest_photo_item(items: Any) -> dict[str, Any] | None:
     return max(
         candidates,
         key=lambda item: (
-            int(item.get("file_size") or 0),
-            int(item.get("width") or 0) * int(item.get("height") or 0),
+            _media_int(item, "file_size", "fileSize"),
+            _media_int(item, "width", "Width") * _media_int(item, "height", "Height"),
         ),
     )
 
@@ -493,28 +537,81 @@ def _media_play_mode(kind: str, mime_type: str) -> str | None:
     return None
 
 
+def _mime_from_name(value: Any) -> str:
+    name = str(value or "").split("?", 1)[0].rsplit("/", 1)[-1].strip().lower()
+    if "." not in name:
+        return ""
+    suffix = "." + name.rsplit(".", 1)[-1]
+    return _MEDIA_SUFFIX_MIME.get(suffix, "")
+
+
+def resolve_media_mime(
+    asset: dict[str, Any] | None,
+    *,
+    file_path: str = "",
+    upstream_mime: str = "",
+) -> str:
+    play = str((asset or {}).get("play") or "")
+    kind = str((asset or {}).get("kind") or "")
+    candidates = [
+        (asset or {}).get("mime_type"),
+        upstream_mime,
+        _mime_from_name((asset or {}).get("file_name")),
+        _mime_from_name(file_path),
+        _MEDIA_KIND_MIME.get(kind, ""),
+    ]
+    for candidate in candidates:
+        mime = str(candidate or "").split(";")[0].strip().lower()
+        if mime and mime not in {"application/octet-stream", "binary/octet-stream", "application/binary"}:
+            if play == "image" and not mime.startswith("image/"):
+                continue
+            if play == "video" and not mime.startswith("video/") and mime not in {"application/ogg", "application/mp4"}:
+                continue
+            if play == "audio" and not mime.startswith("audio/") and mime not in {"application/ogg", "application/mp4"}:
+                continue
+            if mime == "application/ogg":
+                return "video/ogg" if play == "video" else "audio/ogg"
+            if mime == "application/mp4":
+                return "video/mp4" if play == "video" else "audio/mp4"
+            return mime
+    if play == "image":
+        return "image/jpeg"
+    if play == "video":
+        return "video/mp4"
+    if play == "audio":
+        return "audio/mpeg"
+    return "application/octet-stream"
+
+
 def _media_asset_from_file(kind: str, item: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
     file_id = _media_file_id(item)
     if not file_id:
         return None
-    mime_type = str(item.get("mime_type") or "").strip() or _MEDIA_KIND_MIME.get(kind, "")
+    mime_type = (
+        _media_text(item, "mime_type", "mimeType")
+        or _mime_from_name(_media_text(item, "file_name", "fileName"))
+        or _MEDIA_KIND_MIME.get(kind, "")
+    )
     play = _media_play_mode(kind, mime_type)
     if kind == "document" and not play:
         return None
     if not play:
         return None
-    file_size = int(item.get("file_size") or 0)
+    file_size = _media_int(item, "file_size", "fileSize")
+    duration = item.get("duration")
+    if duration in (None, ""):
+        duration = item.get("durationSeconds")
     return {
         "kind": kind,
         "play": play,
         "file_id": file_id,
         "mime_type": mime_type or None,
-        "file_name": str(item.get("file_name") or "").strip() or None,
-        "duration": item.get("duration"),
-        "width": item.get("width"),
-        "height": item.get("height"),
+        "file_name": _media_text(item, "file_name", "fileName") or None,
+        "duration": duration,
+        "width": item.get("width") if item.get("width") is not None else item.get("Width"),
+        "height": item.get("height") if item.get("height") is not None else item.get("Height"),
         "file_size": file_size or None,
         "too_large": file_size > BALE_MEDIA_MAX_BYTES,
     }

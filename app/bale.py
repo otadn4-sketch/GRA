@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -106,29 +107,74 @@ class BaleClient:
         expired = [cache_key for cache_key, (expires, _) in self._file_cache.items() if expires <= now]
         for cache_key in expired:
             self._file_cache.pop(cache_key, None)
-        result = dict(await self._call("getFile", {"file_id": key}) or {})
+        result = await self._get_file_uncached(key)
+        file_path = bale_file_path(result)
+        if not file_path:
+            raise BaleAPIError("getFile", None, "مسیر فایل از بله برنگشت.")
+        result["file_path"] = file_path
         if len(self._file_cache) >= 512:
             oldest = min(self._file_cache, key=lambda item: self._file_cache[item][0])
             self._file_cache.pop(oldest, None)
         self._file_cache[key] = (now + 50 * 60, result)
         return result
 
-    def file_download_url(self, file_path: str) -> str:
-        path = str(file_path or "").replace("\\", "/").lstrip("/")
-        if not path or ".." in path.split("/"):
-            raise BaleAPIError("getFile", None, "مسیر فایل نامعتبر است.")
-        return f"{self.base_url}/file/bot{self.token}/{path}"
+    async def _get_file_uncached(self, file_id: str) -> dict[str, Any]:
+        last_error: BaleAPIError | None = None
+        try:
+            result = dict(await self._call("getFile", {"file_id": file_id}) or {})
+            if bale_file_path(result):
+                return result
+            last_error = BaleAPIError("getFile", None, "مسیر فایل از بله برنگشت.")
+        except BaleAPIError as exc:
+            last_error = exc
+        url = f"{self.base_url}/bot{self.token}/getFile"
+        payload = {"file_id": file_id}
+        for style in ("form", "get"):
+            try:
+                if style == "form":
+                    response = await self._client.post(url, data=payload)
+                else:
+                    response = await self._client.get(url, params=payload)
+                data = response.json()
+                if response.is_success and bool(data.get("ok")):
+                    result = dict(data.get("result") or {})
+                    if bale_file_path(result):
+                        return result
+                    last_error = BaleAPIError("getFile", response.status_code, "مسیر فایل از بله برنگشت.")
+                    continue
+                last_error = BaleAPIError(
+                    "getFile",
+                    response.status_code,
+                    str(data.get("description") or data.get("message") or response.text),
+                )
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                last_error = BaleAPIError("getFile", None, str(exc))
+        raise last_error or BaleAPIError("getFile", None, "دریافت مسیر فایل ناموفق بود.")
 
-    async def open_file_stream(
-        self,
-        file_path: str,
-        *,
-        headers: dict[str, str] | None = None,
-    ) -> httpx.Response:
+    def file_download_url(self, file_path: str) -> str:
+        return bale_file_download_url(self.base_url, self.token, file_path)
+
+    async def download_file(self, file_path: str) -> tuple[bytes, str]:
         url = self.file_download_url(file_path)
         timeout = httpx.Timeout(20.0, read=180.0, write=30.0, pool=20.0)
-        request = self._client.build_request("GET", url, headers=headers or {})
-        return await self._client.send(request, stream=True, timeout=timeout)
+        try:
+            response = await self._client.get(url, follow_redirects=True, timeout=timeout)
+        except httpx.HTTPError as exc:
+            raise BaleAPIError("downloadFile", None, str(exc)) from exc
+        if response.status_code >= 400:
+            raise BaleAPIError(
+                "downloadFile",
+                response.status_code,
+                (response.text or "")[:300] or f"HTTP {response.status_code}",
+            )
+        content_type = str(response.headers.get("content-type") or "").split(";")[0].strip()
+        return response.content, content_type
+
+    async def download_by_file_id(self, file_id: str) -> tuple[bytes, str, str]:
+        info = await self.get_file(file_id)
+        file_path = bale_file_path(info)
+        payload, content_type = await self.download_file(file_path)
+        return payload, content_type, file_path
 
     async def send_message(self, chat_id: int, text: str, **kwargs: Any) -> dict[str, Any]:
         return dict(await self._call("sendMessage", {"chat_id": chat_id, "text": text, **_clean(kwargs)}))
@@ -172,3 +218,42 @@ class BaleClient:
 
 def _clean(values: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
+
+
+def bale_file_path(result: Any) -> str:
+    if isinstance(result, str):
+        return result.strip()
+    if not isinstance(result, dict):
+        return ""
+    for key in ("file_path", "filePath"):
+        value = str(result.get(key) or "").strip()
+        if value:
+            return value
+    nested = result.get("file")
+    if isinstance(nested, dict):
+        return bale_file_path(nested)
+    return ""
+
+
+def bale_file_download_url(base_url: str, token: str, file_path: str) -> str:
+    path = str(file_path or "").strip()
+    if not path:
+        raise BaleAPIError("getFile", None, "مسیر فایل نامعتبر است.")
+    parsed = urlparse(path)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return path
+    normalized = path.replace("\\", "/").lstrip("/")
+    if ".." in normalized.split("/"):
+        raise BaleAPIError("getFile", None, "مسیر فایل نامعتبر است.")
+    prefix = f"file/bot{token}/"
+    if normalized.startswith(prefix):
+        normalized = normalized[len(prefix):]
+    elif normalized.startswith("file/bot"):
+        parts = [part for part in normalized.split("/") if part]
+        rest = "/".join(quote(part, safe=".-_") for part in parts[2:])
+        head = "/".join(parts[:2])
+        return f"{base_url.rstrip('/')}/{head}/{rest}" if rest else f"{base_url.rstrip('/')}/{head}"
+    encoded = "/".join(quote(part, safe=".-_") for part in normalized.split("/") if part)
+    if not encoded:
+        raise BaleAPIError("getFile", None, "مسیر فایل نامعتبر است.")
+    return f"{base_url.rstrip('/')}/file/bot{token}/{encoded}"
