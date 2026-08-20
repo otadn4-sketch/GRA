@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#008080">
   <title>سامانه خبرنامه گرایه</title>
-  <link rel="stylesheet" href="/admin/assets/app.css?v=12.0.3">
+  <link rel="stylesheet" href="/admin/assets/app.css?v=12.1.0">
 </head>
 <body>
   <div class="app-shell">
@@ -59,7 +59,7 @@
       </nav>
       <div class="sidebar-foot">
           <span class="live-dot"></span>
-        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۲.۰.۳</span></small></div>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۲.۱.۰</span></small></div>
       </div>
     </aside>
 
@@ -140,7 +140,12 @@
             <div class="selection-actions" aria-label="کنترل انتخاب پیام‌ها"><button type="button" class="outline-button" id="selectVisibleMessages">انتخاب همه</button><button type="button" class="ghost-button" id="clearMessageSelection">لغو انتخاب</button></div>
           </div>
           <div id="messageGrid" class="message-grid"></div>
-          <div class="stream-more-bar hidden" id="streamMoreBar"><span id="streamMoreHint"></span><button type="button" class="outline-button" id="loadMoreStream">بارگذاری ادامهٔ اخبار همین روز</button></div>
+          <div class="pager-bar hidden" id="streamPager">
+            <button type="button" class="outline-button" id="streamPrevPage">قبلی</button>
+            <div class="pager-numbers" id="streamPageNumbers"></div>
+            <button type="button" class="outline-button" id="streamNextPage">بعدی</button>
+            <span id="streamMoreHint"></span>
+          </div>
         </section>
 
         <section class="page" id="page-quick-start">
@@ -625,29 +630,44 @@
         <section class="page" id="page-eitan-gara">
           <article class="panel">
             <div class="panel-heading">
-              <div><span class="eyebrow">گرایه</span><h3>ایتان گرا</h3><p>یک محور را انتخاب کنید تا همهٔ پیام‌های سامانه با کلیدواژه‌ها و افراد شاخص همان محور جست‌وجو شوند.</p></div>
+              <div><span class="eyebrow">گرایه</span><h3>ایتان گرا</h3></div>
               <button type="button" class="outline-button" id="backToGarayeFromEitan">بازگشت به گرایه</button>
             </div>
             <div id="eitanAxisButtons" class="eitan-axis-buttons"></div>
             <form id="eitanCreatePanel" class="inline-form eitan-create-form" hidden>
               <h4>محور جدید</h4>
-              <p>عنوان محور را بنویسید و دو فایل «کلیدواژه‌ها» و «افراد شاخص» را بارگذاری کنید.</p>
+              <p>عنوان محور و فایل اکسل کتابخانه را بارگذاری کنید. ستون‌های کلیدواژه، افراد، دسته و وزن خوانده می‌شوند.</p>
               <label>عنوان محور<input id="eitanAxisTitle" name="title" maxlength="80" required placeholder="مثلاً امنیت غذایی"></label>
-              <div class="form-grid two">
-                <label>فایل کلیدواژه‌ها<input id="eitanKeywordsFile" name="keywords_file" type="file" accept=".txt,.csv,.xlsx,.xls" required></label>
-                <label>فایل افراد شاخص<input id="eitanPeopleFile" name="people_file" type="file" accept=".txt,.csv,.xlsx,.xls" required></label>
-              </div>
+              <label>فایل کتابخانه<input id="eitanLibraryFile" name="library_file" type="file" accept=".txt,.csv,.xlsx,.xls" required></label>
               <div class="button-row">
                 <button type="submit" class="primary-button" id="submitEitanCreate">ثبت</button>
                 <button type="button" class="ghost-button" id="cancelEitanCreate">انصراف</button>
               </div>
             </form>
           </article>
-          <div class="selection-bar">
-            <div><b id="eitanCount">محور را انتخاب کنید</b><span id="eitanSelectionHint">پیام‌های منطبق با فایل‌های همان محور در همهٔ سامانه نمایش داده می‌شوند.</span></div>
-          </div>
-          <div id="eitanMessageGrid" class="message-grid"></div>
-          <div class="stream-more-bar hidden" id="eitanMoreBar"><span id="eitanMoreHint"></span><button type="button" class="outline-button" id="loadMoreEitan">بارگذاری پیام‌های بیشتر</button></div>
+          <section id="eitanWorkspace" class="eitan-workspace hidden">
+            <article class="panel eitan-library-panel">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">کتابخانهٔ محور</span>
+                  <h3 id="eitanLibraryTitle">فایل اصلاحی</h3>
+                  <p id="eitanLibraryHint">با بارگذاری فایل اکسل تازه، جست‌وجوی همین محور از نو ساخته می‌شود.</p>
+                </div>
+                <label class="outline-button import-file-button">انتخاب فایل اصلاحی<input id="eitanReplaceLibraryFile" type="file" accept=".txt,.csv,.xlsx,.xls" hidden></label>
+              </div>
+            </article>
+            <div id="eitanCharts" class="eitan-charts hidden"></div>
+            <div class="selection-bar">
+              <div><b id="eitanCount"></b><span id="eitanSelectionHint"></span></div>
+            </div>
+            <div id="eitanMessageGrid" class="message-grid"></div>
+            <div class="pager-bar hidden" id="eitanPager">
+              <button type="button" class="outline-button" id="eitanPrevPage">قبلی</button>
+              <div class="pager-numbers" id="eitanPageNumbers"></div>
+              <button type="button" class="outline-button" id="eitanNextPage">بعدی</button>
+              <span id="eitanMoreHint"></span>
+            </div>
+          </section>
         </section>
 
         <section class="page" id="page-high-attention">
@@ -700,38 +720,36 @@
         <section class="page" id="page-bulletins">
           <div class="content-grid bulletin-grid">
             <article class="panel">
-              <div class="panel-heading"><div><h3>ساخت خبرنامه</h3><p>خبرهای نهایی را انتخاب و ترتیب انتشار را مشخص کنید؛ این بخش فقط خروجی HTML، Word و PDF را صفحه‌آرایی می‌کند.</p></div></div>
+              <div class="panel-heading"><div><h3>ساخت خبرنامه</h3></div></div>
               <div class="form-grid two bulletin-meta-fields">
-                <label>عنوان خبرنامه<input id="bulletinTitle" value="خبرنامه گرایه"></label>
                 <label>شماره خبرنامه<input id="bulletinIssue" type="number" min="1" placeholder="خودکار"></label>
-                <label>نوع گزارش<select id="bulletinMode"><option value="concise">کوتاه</option><option value="full">کامل</option></select></label>
-                <label class="full">مقدمه خبرنامه<textarea id="bulletinIntroduction" rows="5" maxlength="8000" placeholder="مقدمه را دقیقاً به شکلی که باید در خبرنامه چاپ شود بنویسید. در صورت خالی‌بودن، صفحهٔ مقدمه ایجاد نمی‌شود."></textarea></label>
               </div>
               <div class="bulletin-day-picker">
-                <label>مبنای انتخاب خبرها<select id="bulletinFinalizationDay"><option value="">همهٔ خبرهای نهایی‌شده</option></select></label>
+                <label>مبنای انتخاب خبرها<select id="bulletinFinalizationDay"><option value="">انتخاب روز</option></select></label>
                 <label>انتخاب تقویمی روز<input id="bulletinJalaliDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date></label>
-                <p id="bulletinDayHint">روز را از فهرست یا تقویم انتخاب کنید؛ خروجی فقط از خبرهایی ساخته می‌شود که خودتان تیک زده‌اید.</p>
+                <p id="bulletinDayHint" hidden></p>
               </div>
               <div class="bulletin-drafts-toolbar hidden" id="bulletinDraftsToolbar">
                 <label class="select-all-label"><input id="selectAllFinalizedDrafts" type="checkbox"> انتخاب همه</label>
                 <span id="bulletinDraftsSelectionHint">خبرهای نهایی همین روز</span>
               </div>
-              <div id="finalizedDrafts" class="sortable-list bulletin-drafts-scroll"><div class="empty-mini">هنوز خبر نهایی وجود ندارد.</div></div>
+              <div id="finalizedDrafts" class="sortable-list bulletin-drafts-scroll"><div class="empty-mini">روز را انتخاب کنید.</div></div>
               <section class="bulletin-high-attention-picker" aria-labelledby="bulletinHighAttentionTitle">
                 <div class="block-head"><div><h4 id="bulletinHighAttentionTitle">پربازتاب‌های نهایی</h4><p>محورهای پربازتاب نهایی‌شدهٔ همین روز را برای درج در بخش پربازتاب بولتن انتخاب کنید.</p></div></div>
                 <div id="finalizedHighAttentionItems" class="sortable-list"><div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div></div>
               </section>
               <button class="primary-button wide" id="createManualBulletin">ساخت و آماده‌سازی خروجی</button>
             </article>
-            <article class="panel preview-card">
-              <span class="eyebrow">پیش‌نمایش</span><h2 id="previewTitle">خبرنامه گرایه</h2><div class="preview-line"></div>
-              <p id="previewMeta">شماره خبرنامه پس از ساخت ثبت می‌شود.</p>
-              <div id="previewItems" class="preview-items"><div class="empty-mini">خبرهای نهایی انتخاب‌شده اینجا نمایش داده می‌شوند.</div></div>
-            </article>
           </div>
           <article class="panel">
-            <div class="panel-heading"><div><h3>خروجی‌ها و اجراهای اخیر</h3><p>پیش‌نمایش مرجع HTML، PDF مستقیم، Word قابل‌ویرایش و بسته کامل</p></div></div>
+            <div class="panel-heading"><div><h3>خروجی‌ها و اجراهای اخیر</h3></div></div>
             <div class="table-wrap"><table><thead><tr><th>شناسه</th><th>شماره</th><th>تاریخ</th><th>وضعیت</th><th>خبر</th><th>خروجی‌ها و عملیات</th></tr></thead><tbody id="bulletinRows"></tbody></table></div>
+            <div class="pager-bar hidden" id="bulletinPager">
+              <button type="button" class="outline-button" id="bulletinPrevPage">قبلی</button>
+              <div class="pager-numbers" id="bulletinPageNumbers"></div>
+              <button type="button" class="outline-button" id="bulletinNextPage">بعدی</button>
+              <span id="bulletinPageHint"></span>
+            </div>
           </article>
         </section>
 
@@ -917,7 +935,7 @@
     <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin/assets/wordcloud-layout.js?v=12.0.3" defer></script>
-  <script src="/admin/assets/app.js?v=12.0.3" defer></script>
+  <script src="/admin/assets/wordcloud-layout.js?v=12.1.0" defer></script>
+  <script src="/admin/assets/app.js?v=12.1.0" defer></script>
 </body>
 </html>

@@ -28,7 +28,9 @@ from .bulletin_validation import is_generic_url, valid_public_url
 from .calendar_dates import report_calendar_labels
 from .html_layout_engine import _category_color, _ordered_public_cards, _topic_share_rows
 from .persian_text import to_persian_digits
+from .weekday_art import weekday_cover_png_bytes
 from .weekday_palette import weekday_palette_for_report
+from .word_rtl import apply_persian_document, apply_persian_run, apply_persian_section, rtl_paragraph, rtl_table
 
 _FOOTNOTES_XML = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -47,12 +49,9 @@ def _hex_rgb(value: str) -> RGBColor:
     return RGBColor(int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16))
 
 
-def _rtl(paragraph) -> None:
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+def _rtl(paragraph, *, align: str = "right") -> None:
+    rtl_paragraph(paragraph, align=align)
     paragraph.paragraph_format.space_after = Pt(4)
-    p_pr = paragraph._p.get_or_add_pPr()
-    if p_pr.find(qn("w:bidi")) is None:
-        p_pr.append(OxmlElement("w:bidi"))
 
 
 def _set_run(run, *, size: int = 12, bold: bool = False, color: str = "#20252B", font: str = "IRZar") -> None:
@@ -64,13 +63,14 @@ def _set_run(run, *, size: int = 12, bold: bool = False, color: str = "#20252B",
     r_fonts = r_pr.get_or_add_rFonts()
     for attr in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
         r_fonts.set(qn(attr), font)
+    apply_persian_run(r_pr)
 
 
 def _add_text(doc: Document, text: str, *, size: int = 12, bold: bool = False, color: str = "#20252B", center: bool = False, font: str = "IRZar"):
     paragraph = doc.add_paragraph()
     _rtl(paragraph)
     if center:
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _rtl(paragraph, align="center")
     run = paragraph.add_run(to_persian_digits(text))
     _set_run(run, size=size, bold=bold, color=color, font=font)
     return paragraph
@@ -278,6 +278,7 @@ def _add_news_card(
     ink = palette.get("ink", "#20252B")
     table = doc.add_table(rows=1, cols=1)
     table.alignment = WD_TABLE_ALIGNMENT.RIGHT
+    rtl_table(table)
     cell = table.cell(0, 0)
     _shade(cell, palette.get("ground", "#FAF3F1"))
     _set_cell_border(cell, edge="right", color=identity, size="24")
@@ -348,6 +349,7 @@ def build_layout_docx(data: BulletinData, path: Path) -> list[str]:
         raise RuntimeError("برای صفحه‌آرایی بولتن، خبر نهایی قابل انتشار وجود ندارد.")
 
     doc = Document()
+    apply_persian_document(doc)
     font = "IRZar"
     identity = palette.get("main", "#B85C4A")
     dark = palette.get("dark", "#783B31")
@@ -357,32 +359,44 @@ def build_layout_docx(data: BulletinData, path: Path) -> list[str]:
     section = doc.sections[0]
     _configure_a3(section, palette)
     _set_one_column(section)
+    apply_persian_section(section)
 
     cover = doc.add_table(rows=1, cols=1)
+    rtl_table(cover)
     cover.alignment = WD_TABLE_ALIGNMENT.CENTER
     cover_cell = cover.cell(0, 0)
     _shade(cover_cell, dark)
     cover_cell.width = Mm(265)
     p = cover_cell.paragraphs[0]
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _rtl(p, align="center")
     run = p.add_run("بولتن تحلیلی گرایه")
     _set_run(run, size=14, bold=True, color=palette.get("light", "#EBC4BA"), font=font)
     title = cover_cell.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _rtl(title, align="center")
     run = title.add_run("خبرنامه گرایه")
     _set_run(run, size=36, bold=True, color="#FFFFFF", font=font)
     copy = cover_cell.add_paragraph()
-    copy.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _rtl(copy, align="center")
     run = copy.add_run("رصد، تحلیل و صورت‌بندی هوشمند جریان خبر")
     _set_run(run, size=13, color="#F7F1EF", font=font)
     meta = cover_cell.add_paragraph()
-    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _rtl(meta, align="center")
     run = meta.add_run(to_persian_digits(f"شماره {data.meta.issue_number}  ·  {dates['jalali_label']}"))
     _set_run(run, size=12, color="#F3E6E2", font=font)
     calendars = cover_cell.add_paragraph()
-    calendars.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _rtl(calendars, align="center")
     run = calendars.add_run(to_persian_digits(f"قمری {dates['hijri_label']}  ·  میلادی {dates['gregorian_label']}"))
     _set_run(run, size=11, color=palette.get("light", "#EBC4BA"), font=font)
+    chip = cover_cell.add_paragraph()
+    _rtl(chip, align="center")
+    run = chip.add_run(to_persian_digits(f"{palette.get('name')}  ·  {palette.get('label')}"))
+    _set_run(run, size=12, bold=True, color=palette.get("light", "#EBC4BA"), font=font)
+    art_p = cover_cell.add_paragraph()
+    art_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    try:
+        art_p.add_run().add_picture(weekday_cover_png_bytes(palette), width=Cm(9.2), height=Cm(9.2))
+    except Exception:
+        pass
     doc.add_page_break()
 
     _add_text(doc, "فهرست", size=22, bold=True, color=dark, center=True)
@@ -413,20 +427,23 @@ def build_layout_docx(data: BulletinData, path: Path) -> list[str]:
             _add_text(doc, item.summary, size=12, color=ink)
         doc.add_page_break()
 
-    content = doc.add_section()
-    _configure_a3(content, palette)
-    _set_two_columns(content)
-
     current_category = None
     for category, person, statement in ordered_cards:
         if current_category != category.category_id:
-            if current_category is not None:
-                doc.add_page_break()
-            current_category = category.category_id
+            title_section = doc.add_section()
+            _configure_a3(title_section, palette)
+            _set_one_column(title_section)
+            apply_persian_section(title_section)
             heading = doc.add_paragraph()
-            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _rtl(heading, align="center")
+            heading.paragraph_format.space_before = Pt(160)
             run = heading.add_run(to_persian_digits(category.title))
-            _set_run(run, size=20, bold=True, color=dark)
+            _set_run(run, size=36, bold=True, color=dark)
+            news_section = doc.add_section()
+            _configure_a3(news_section, palette)
+            _set_two_columns(news_section)
+            apply_persian_section(news_section)
+            current_category = category.category_id
         _add_news_card(
             doc,
             person,
@@ -439,10 +456,12 @@ def build_layout_docx(data: BulletinData, path: Path) -> list[str]:
     chart = doc.add_section()
     _configure_a3(chart, palette)
     _set_one_column(chart)
+    apply_persian_section(chart)
     rows = _topic_share_rows(data)
     if rows:
         _add_text(doc, "سهم موضوعات", size=22, bold=True, color=dark, center=True)
         bar = doc.add_table(rows=1, cols=len(rows))
+        rtl_table(bar)
         bar.alignment = WD_TABLE_ALIGNMENT.CENTER
         for index, item in enumerate(rows):
             cell = bar.cell(0, index)

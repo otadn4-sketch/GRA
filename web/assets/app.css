@@ -544,6 +544,25 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 .high-attention-filters{margin-bottom:16px}
 .high-attention-filters .stream-filter-window{grid-template-columns:repeat(2,minmax(0,1fr))}
 .stream-filter-hint{margin:0 auto 0 0;color:#426a6b;font-size:12px;align-self:center}
-.topbar p[hidden],.panel-heading p[hidden]{display:none!important}
+.eitan-workspace{display:grid;gap:16px}
+.eitan-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.eitan-chart-card{margin:0}
+.eitan-bar-list{display:grid;gap:8px}
+.eitan-bar-row{display:grid;grid-template-columns:minmax(90px,.7fr) minmax(80px,1.4fr) auto;gap:8px;align-items:center;font-size:12px}
+.eitan-bar-row b{font-size:12px}
+.eitan-bar-track{height:8px;border-radius:99px;background:#e3eeec;overflow:hidden}
+.eitan-bar-track i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#008080,#004e4f)}
+.eitan-library-panel .import-file-button{margin:0}
+.pager-bar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-top:14px;padding:12px 14px;border:1px dashed rgba(0,128,128,.35);border-radius:12px;background:#f6f9f9}
+.pager-bar span{color:var(--muted);font-size:12px}
+.pager-numbers{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pager-page{min-width:36px;height:36px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+.pager-page.is-active{background:var(--blue);color:#fff;border-color:var(--blue)}
+.pager-ellipsis{color:var(--muted);padding:0 4px}
+.bulletin-grid{grid-template-columns:1fr!important}
+@media(max-width:850px){
+  .eitan-charts{grid-template-columns:1fr}
+  .eitan-bar-row{grid-template-columns:1fr}
+}
 
 

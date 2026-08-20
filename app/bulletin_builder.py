@@ -444,11 +444,11 @@ class BulletinDataBuilder:
             for _, (_, _, statement) in ordered_temporary
         ]
 
-        # Populate categories in the publication section order: events first,
-        # then the registry groups, then any exact custom شناسنامه labels.
+        # Populate categories in the publication section order: registry groups
+        # first, then any exact custom شناسنامه labels, with events last.
         present_keys = {entry[0] for entry in temporary}
         ordered_keys: list[str] = [
-            key for key, _title in CATEGORY_ORDER if key in present_keys
+            key for key, _title in CATEGORY_ORDER if key in present_keys and key != "events"
         ]
         custom_keys = sorted(
             key for key in present_keys if key.startswith("custom:")
@@ -456,6 +456,8 @@ class BulletinDataBuilder:
         ordered_keys.extend(key for key in custom_keys if key not in ordered_keys)
         if "other" in present_keys and "other" not in ordered_keys:
             ordered_keys.append("other")
+        if "events" in present_keys:
+            ordered_keys.append("events")
 
         categories: list[BulletinCategory] = []
         for order, ckey in enumerate(ordered_keys, start=1):

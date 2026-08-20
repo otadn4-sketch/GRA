@@ -25,6 +25,14 @@ from .auth import (
     token_digest,
     verify_password,
 )
+from .eitan_library import (
+    EITAN_SEARCH_GROUP_LIMIT,
+    EITAN_SEARCH_TERM_LIMIT,
+    eitan_chart_terms,
+    eitan_search_groups as build_eitan_search_groups,
+    library_from_axis,
+    library_from_parts,
+)
 from .persian_text import canonical_key, normalize_persian
 from .wordcloud import WORD_CLOUD_WEIGHTS, content_words, ranked_word_cloud
 
@@ -1537,6 +1545,7 @@ CREATE TABLE IF NOT EXISTS eitan_axes (
     title TEXT NOT NULL,
     keywords_text TEXT NOT NULL DEFAULT '',
     people_text TEXT NOT NULL DEFAULT '',
+    library_json TEXT NOT NULL DEFAULT '',
     is_builtin INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -1653,102 +1662,78 @@ BUILTIN_EITAN_AXES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...
     ),
 )
 
-EITAN_FILE_MAX_BYTES = 2 * 1024 * 1024
-EITAN_TEXT_MAX_CHARS = 200_000
-EITAN_SEARCH_TERM_LIMIT = 60
-_EITAN_HEADER_TERMS = {
-    "کلیدواژه",
-    "کلیدواژه‌ها",
-    "keyword",
-    "keywords",
-    "نام",
-    "افراد",
-    "شخص",
-    "افراد شاخص",
-    "title",
-    "name",
-}
-
-
-def split_eitan_terms(text: str | None) -> list[str]:
-    seen: set[str] = set()
-    terms: list[str] = []
-    for raw_line in str(text or "").replace("\r", "\n").split("\n"):
-        line = " ".join(raw_line.split()).strip()
-        if not line or line.startswith("#"):
-            continue
-        chunks = re.split(r"[|،;]+", line)
-        if len(chunks) == 1 and "," in line and "\t" not in line:
-            chunks = [part.strip() for part in line.split(",")]
-        for chunk in chunks:
-            term = " ".join(str(chunk or "").split())
-            if len(term) < 2:
-                continue
-            key = canonical_key(term) or term
-            if key in _EITAN_HEADER_TERMS or key in seen:
-                continue
-            seen.add(key)
-            terms.append(term)
-    return terms
-
-
-def parse_eitan_upload(filename: str | None, data: bytes) -> str:
-    payload = data or b""
-    if len(payload) > EITAN_FILE_MAX_BYTES:
-        raise ValueError("حجم فایل نباید بیشتر از ۲ مگابایت باشد.")
-    name = str(filename or "").strip().lower()
-    lines: list[str] = []
-    if name.endswith((".xlsx", ".xlsm")):
-        from openpyxl import load_workbook
-
-        workbook = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
-        try:
-            sheet = workbook.active
-            for row in sheet.iter_rows(min_col=1, max_col=1, values_only=True):
-                value = row[0] if row else None
-                if value is None:
-                    continue
-                text = " ".join(str(value).split())
-                if text:
-                    lines.append(text)
-        finally:
-            workbook.close()
-    elif name.endswith(".csv"):
-        sample = payload.decode("utf-8-sig", errors="replace")
-        for row in csv.reader(io.StringIO(sample)):
-            if not row:
-                continue
-            text = " ".join(str(row[0] or "").split())
-            if text:
-                lines.append(text)
-    else:
-        lines = payload.decode("utf-8-sig", errors="replace").splitlines()
-    terms = split_eitan_terms("\n".join(lines))
-    if not terms:
-        raise ValueError("در فایل عبارتی برای جست‌وجو پیدا نشد.")
-    stored = "\n".join(terms)
-    if len(stored) > EITAN_TEXT_MAX_CHARS:
-        raise ValueError("حجم فهرست عبارات بیش از حد مجاز است.")
-    return stored
+_EITAN_TERM_SQL = """(
+    IFNULL(m.normalized_text,'') LIKE ?
+    OR IFNULL(m.text,'') LIKE ?
+    OR IFNULL(m.caption,'') LIKE ?
+    OR IFNULL(m.detected_person_name,'') LIKE ?
+    OR IFNULL(m.sender_name,'') LIKE ?
+    OR EXISTS (
+        SELECT 1 FROM message_speaker_tags st
+        WHERE st.message_id=m.id AND (
+            st.speaker_name LIKE ?
+            OR st.specific_topic LIKE ?
+            OR st.general_topic LIKE ?
+        )
+    )
+)"""
+_EITAN_TERM_PARAM_COUNT = 8
 
 
 def eitan_axis_public(row: dict[str, Any], *, include_terms: bool = False) -> dict[str, Any]:
-    keywords = split_eitan_terms(row.get("keywords_text"))
-    people = split_eitan_terms(row.get("people_text"))
+    library = library_from_axis(row)
     payload = {
         "axis_id": row.get("axis_id"),
         "slug": row.get("slug"),
         "title": row.get("title"),
         "is_builtin": bool(int(row.get("is_builtin") or 0)),
-        "keyword_count": len(keywords),
-        "people_count": len(people),
+        "keyword_count": len(library.keywords),
+        "people_count": len(library.people),
+        "library": library.summary(),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
     if include_terms:
-        payload["keywords"] = keywords
-        payload["people"] = people
+        payload["keywords"] = library.keywords
+        payload["people"] = library.people
     return payload
+
+
+def _append_eitan_search(where: list[str], params: list[Any], term_groups: list[list[str]] | None) -> bool:
+    cleaned_groups: list[list[str]] = []
+    seen_groups: set[tuple[str, ...]] = set()
+    for group in term_groups or []:
+        terms: list[str] = []
+        seen_terms: set[str] = set()
+        for raw in group:
+            term = normalize_persian(str(raw or "").strip())
+            if len(term) < 2:
+                continue
+            key = canonical_key(term) or term
+            if key in seen_terms:
+                continue
+            seen_terms.add(key)
+            terms.append(term)
+        if not terms:
+            continue
+        marker = tuple(canonical_key(term) or term for term in terms)
+        if marker in seen_groups:
+            continue
+        seen_groups.add(marker)
+        cleaned_groups.append(terms)
+        if len(cleaned_groups) >= EITAN_SEARCH_GROUP_LIMIT:
+            break
+    if not cleaned_groups:
+        return False
+    group_sql: list[str] = []
+    for group in cleaned_groups:
+        parts: list[str] = []
+        for term in group:
+            parts.append(_EITAN_TERM_SQL)
+            params.extend([f"%{term}%"] * _EITAN_TERM_PARAM_COUNT)
+        group_sql.append("(" + " AND ".join(parts) + ")")
+    where.append("(" + " OR ".join(group_sql) + ")")
+    return True
 
 
 class Database:
@@ -1792,6 +1777,14 @@ class Database:
         conn = await self._connect()
         try:
             await conn.executescript(SCHEMA)
+            eitan_columns = {
+                str(row["name"])
+                for row in await (await conn.execute("PRAGMA table_info(eitan_axes)")).fetchall()
+            }
+            if "library_json" not in eitan_columns:
+                await conn.execute(
+                    "ALTER TABLE eitan_axes ADD COLUMN library_json TEXT NOT NULL DEFAULT ''"
+                )
             # A dashboard account may be linked to one Bale sender identity.
             # This is deliberately additive, so old operator accounts and all
             # incoming-message history remain intact after the upgrade.
@@ -2589,31 +2582,48 @@ class Database:
     async def ensure_builtin_eitan_axes(self) -> None:
         now = utc_now()
         for slug, title, keywords, people in BUILTIN_EITAN_AXES:
+            library = library_from_parts(keywords=keywords, people=people, filename=f"builtin:{slug}")
             axis_id = f"eitan-{slug}"
-            keywords_text = "\n".join(keywords)
-            people_text = "\n".join(people)
+            keywords_text = "\n".join(library.keywords)
+            people_text = "\n".join(library.people)
+            library_json = library.as_json()
             existing = await self._fetchone(
                 "SELECT axis_id FROM eitan_axes WHERE slug=?",
                 (slug,),
             )
             if existing:
-                await self._execute(
-                    """
-                    UPDATE eitan_axes
-                    SET title=?, keywords_text=?, people_text=?, is_builtin=1, updated_at=?
-                    WHERE slug=? AND is_builtin=1
-                    """,
-                    (title, keywords_text, people_text, now, slug),
-                )
+                current = await self.get_eitan_axis(str(existing["axis_id"]))
+                library_name = str((current or {}).get("library_json") or "")
+                custom = False
+                if library_name.strip().startswith("{"):
+                    try:
+                        payload = json.loads(library_name)
+                        custom = bool(payload.get("filename")) and not str(payload.get("filename")).startswith("builtin:")
+                    except json.JSONDecodeError:
+                        custom = False
+                if custom:
+                    await self._execute(
+                        "UPDATE eitan_axes SET title=?, is_builtin=1, updated_at=? WHERE slug=? AND is_builtin=1",
+                        (title, now, slug),
+                    )
+                else:
+                    await self._execute(
+                        """
+                        UPDATE eitan_axes
+                        SET title=?, keywords_text=?, people_text=?, library_json=?, is_builtin=1, updated_at=?
+                        WHERE slug=? AND is_builtin=1
+                        """,
+                        (title, keywords_text, people_text, library_json, now, slug),
+                    )
                 continue
             await self._execute(
                 """
                 INSERT INTO eitan_axes(
-                    axis_id, slug, title, keywords_text, people_text,
+                    axis_id, slug, title, keywords_text, people_text, library_json,
                     is_builtin, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
-                (axis_id, slug, title, keywords_text, people_text, now, now),
+                (axis_id, slug, title, keywords_text, people_text, library_json, now, now),
             )
 
     async def list_eitan_axes(self) -> list[dict[str, Any]]:
@@ -2636,49 +2646,205 @@ class Database:
         self,
         *,
         title: str,
-        keywords_text: str,
-        people_text: str,
+        keywords_text: str = "",
+        people_text: str = "",
+        library_json: str = "",
     ) -> dict[str, Any]:
         heading = " ".join(str(title or "").split())
         if not heading:
             raise ValueError("عنوان محور را وارد کنید.")
         if len(heading) > 80:
             raise ValueError("عنوان محور نباید بیشتر از ۸۰ نویسه باشد.")
-        keywords = split_eitan_terms(keywords_text)
-        people = split_eitan_terms(people_text)
-        if not keywords:
-            raise ValueError("فایل کلیدواژه‌ها باید دست‌کم یک عبارت داشته باشد.")
-        if not people:
-            raise ValueError("فایل افراد شاخص باید دست‌کم یک نام داشته باشد.")
+        library = library_from_axis(
+            {"library_json": library_json, "keywords_text": keywords_text, "people_text": people_text}
+        )
+        if not library.keywords and not library.people:
+            raise ValueError("فایل کتابخانه باید دست‌کم یک عبارت یا نام داشته باشد.")
         now = utc_now()
         axis_id = str(uuid4())
         slug = f"custom-{axis_id.replace('-', '')[:12]}"
         await self._execute(
             """
             INSERT INTO eitan_axes(
-                axis_id, slug, title, keywords_text, people_text,
+                axis_id, slug, title, keywords_text, people_text, library_json,
                 is_builtin, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
             """,
-            (axis_id, slug, heading, "\n".join(keywords), "\n".join(people), now, now),
+            (
+                axis_id,
+                slug,
+                heading,
+                "\n".join(library.keywords),
+                "\n".join(library.people),
+                library.as_json(),
+                now,
+                now,
+            ),
+        )
+        row = await self.get_eitan_axis(axis_id)
+        return eitan_axis_public(row or {}, include_terms=True)
+
+    async def update_eitan_axis_library(
+        self,
+        axis_id: str,
+        *,
+        library_json: str,
+    ) -> dict[str, Any]:
+        axis = await self.get_eitan_axis(axis_id)
+        if not axis:
+            raise ValueError("محور پیدا نشد.")
+        library = library_from_axis({"library_json": library_json})
+        if not library.keywords and not library.people:
+            raise ValueError("فایل کتابخانه باید دست‌کم یک عبارت یا نام داشته باشد.")
+        await self._execute(
+            """
+            UPDATE eitan_axes
+            SET keywords_text=?, people_text=?, library_json=?, updated_at=?
+            WHERE axis_id=?
+            """,
+            (
+                "\n".join(library.keywords),
+                "\n".join(library.people),
+                library.as_json(),
+                utc_now(),
+                str(axis_id),
+            ),
         )
         row = await self.get_eitan_axis(axis_id)
         return eitan_axis_public(row or {}, include_terms=True)
 
     def eitan_search_terms(self, axis: dict[str, Any]) -> list[str]:
-        terms = split_eitan_terms(axis.get("keywords_text"))
-        terms.extend(split_eitan_terms(axis.get("people_text")))
+        groups = build_eitan_search_groups(library_from_axis(axis))
+        terms: list[str] = []
         seen: set[str] = set()
-        unique: list[str] = []
-        for term in terms:
-            key = canonical_key(term) or term
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(term)
-            if len(unique) >= EITAN_SEARCH_TERM_LIMIT:
-                break
-        return unique
+        for group in groups:
+            for term in group:
+                key = canonical_key(term) or term
+                if key in seen:
+                    continue
+                seen.add(key)
+                terms.append(term)
+                if len(terms) >= EITAN_SEARCH_TERM_LIMIT:
+                    return terms
+        return terms
+
+    def eitan_search_groups(self, axis: dict[str, Any]) -> list[list[str]]:
+        return build_eitan_search_groups(library_from_axis(axis))
+
+    async def eitan_axis_insights(self, axis: dict[str, Any]) -> dict[str, Any]:
+        library = library_from_axis(axis)
+        groups = build_eitan_search_groups(library)
+        where = ["1=1"]
+        params: list[Any] = []
+        empty = {
+            "total": 0,
+            "sample_size": 0,
+            "library": library.summary(),
+            "daily": [],
+            "sources": [],
+            "terms": [],
+            "kinds": [],
+            "clusters": [],
+        }
+        if not _append_eitan_search(where, params, groups):
+            return empty
+        clause = " AND ".join(where)
+        total_row = await self._fetchone(
+            f"SELECT COUNT(*) AS c FROM messages m WHERE {clause}", params
+        )
+        sample = await self._fetchall(
+            f"""
+            SELECT COALESCE(m.published_at,m.received_at,m.created_at) AS ts,
+                   m.source_chat_title, m.source_chat_username,
+                   IFNULL(m.normalized_text,'') AS normalized_text,
+                   IFNULL(m.text,'') AS text,
+                   IFNULL(m.caption,'') AS caption,
+                   IFNULL(m.detected_person_name,'') AS detected_person_name
+            FROM messages m
+            WHERE {clause}
+            ORDER BY COALESCE(m.published_at,m.received_at) DESC, m.id DESC
+            LIMIT 800
+            """,
+            params,
+        )
+        import jdatetime
+
+        day_counts: Counter[str] = Counter()
+        source_counts: Counter[str] = Counter()
+        term_counts: Counter[str] = Counter()
+        kind_counts: Counter[str] = Counter()
+        cluster_counts: Counter[str] = Counter()
+        tracked = eitan_chart_terms(library, limit=28)
+        keyword_set = {canonical_key(term) or term for term in library.keywords}
+        person_set = {canonical_key(term) or term for term in library.people}
+
+        def haystack_of(item: dict[str, Any]) -> str:
+            return normalize_persian(
+                " ".join(
+                    [
+                        str(item.get("normalized_text") or ""),
+                        str(item.get("text") or ""),
+                        str(item.get("caption") or ""),
+                        str(item.get("detected_person_name") or ""),
+                    ]
+                )
+            )
+
+        for item in sample:
+            fields = _tehran_flow_fields(item.get("ts"))
+            gregorian = str(fields.get("flow_date") or "")
+            if gregorian:
+                try:
+                    year, month, day = (int(part) for part in gregorian.split("-")[:3])
+                    label = jdatetime.date.fromgregorian(date=datetime(year, month, day).date()).strftime("%Y/%m/%d")
+                except (TypeError, ValueError):
+                    label = gregorian
+                day_counts[label] += 1
+            source = str(item.get("source_chat_title") or item.get("source_chat_username") or "منبع نامشخص")
+            source_counts[source] += 1
+            haystack = haystack_of(item)
+            matched_kinds: set[str] = set()
+            for tracked_term in tracked:
+                term = str(tracked_term["term"])
+                if term and term in haystack:
+                    term_counts[term] += 1
+                    key = canonical_key(term) or term
+                    if key in person_set:
+                        matched_kinds.add("افراد شاخص")
+                    if key in keyword_set:
+                        matched_kinds.add("کلیدواژه")
+            for kind in matched_kinds:
+                kind_counts[kind] += 1
+            for cluster in library.clusters:
+                name = str(cluster.get("name") or "")
+                cluster_terms = [*(cluster.get("keywords") or []), *(cluster.get("people") or [])]
+                if name and any(str(term) and str(term) in haystack for term in cluster_terms):
+                    cluster_counts[name] += 1
+
+        def top_rows(counter: Counter[str], *, limit: int) -> list[dict[str, Any]]:
+            return [{"label": label, "count": count} for label, count in counter.most_common(limit)]
+
+        term_rows = [
+            {
+                "label": item["term"],
+                "count": int(term_counts.get(item["term"]) or 0),
+                "kind": item["kind"],
+                "weight": item["weight"],
+            }
+            for item in tracked
+            if term_counts.get(item["term"])
+        ]
+        term_rows.sort(key=lambda row: (-int(row["count"]), str(row["label"])))
+        return {
+            "total": int((total_row or {}).get("c") or 0),
+            "sample_size": len(sample),
+            "library": library.summary(),
+            "daily": [{"label": label, "count": day_counts[label]} for label in sorted(day_counts.keys())],
+            "sources": top_rows(source_counts, limit=8),
+            "terms": term_rows[:12],
+            "kinds": top_rows(kind_counts, limit=8),
+            "clusters": top_rows(cluster_counts, limit=8),
+        }
 
     async def revoke_admin_session(self, token: str | None) -> None:
         if token:
@@ -3422,6 +3588,7 @@ class Database:
         source_chat_id: int | None = None,
         query: str | None = None,
         terms: list[str] | None = None,
+        term_groups: list[list[str]] | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 100,
@@ -3429,44 +3596,10 @@ class Database:
     ) -> dict[str, Any]:
         where = ["1=1"]
         params: list[Any] = []
-        if terms is not None:
-            cleaned: list[str] = []
-            seen_terms: set[str] = set()
-            for raw in terms:
-                term = normalize_persian(str(raw or "").strip())
-                if len(term) < 2:
-                    continue
-                key = canonical_key(term) or term
-                if key in seen_terms:
-                    continue
-                seen_terms.add(key)
-                cleaned.append(term)
-                if len(cleaned) >= EITAN_SEARCH_TERM_LIMIT:
-                    break
-            if not cleaned:
+        if term_groups is not None or terms is not None:
+            groups = term_groups if term_groups is not None else [[term] for term in (terms or [])]
+            if not _append_eitan_search(where, params, groups):
                 return {"total": 0, "items": []}
-            or_parts: list[str] = []
-            for term in cleaned:
-                like = f"%{term}%"
-                or_parts.append(
-                    """(
-                        IFNULL(m.normalized_text,'') LIKE ?
-                        OR IFNULL(m.text,'') LIKE ?
-                        OR IFNULL(m.caption,'') LIKE ?
-                        OR IFNULL(m.detected_person_name,'') LIKE ?
-                        OR IFNULL(m.sender_name,'') LIKE ?
-                        OR EXISTS (
-                            SELECT 1 FROM message_speaker_tags st
-                            WHERE st.message_id=m.id AND (
-                                st.speaker_name LIKE ?
-                                OR st.specific_topic LIKE ?
-                                OR st.general_topic LIKE ?
-                            )
-                        )
-                    )"""
-                )
-                params.extend([like] * 8)
-            where.append("(" + " OR ".join(or_parts) + ")")
         if status == "analyzed":
             # Analysis is a workflow state layered on top of the source-review
             # status, so it must not be compared to ``messages.status``.

@@ -37,9 +37,9 @@ from .db import (
     comparable_utc_iso,
     eitan_axis_public,
     message_media_assets,
-    parse_eitan_upload,
     resolve_media_mime,
 )
+from .eitan_library import parse_eitan_library_upload
 from .gapgpt_status import fetch_gapgpt_status
 from .live_update import apply_update_zip, current_version, last_update_status, request_reload
 from .scheduler import BulletinScheduler
@@ -947,22 +947,16 @@ def create_dashboard_router(
         request: Request,
         actor: str = Depends(admin_identity),
         title: str = Form(...),
-        keywords_file: UploadFile = File(...),
-        people_file: UploadFile = File(...),
+        library_file: UploadFile = File(...),
     ) -> dict[str, Any]:
         try:
-            keywords_text = parse_eitan_upload(
-                keywords_file.filename,
-                await keywords_file.read(),
-            )
-            people_text = parse_eitan_upload(
-                people_file.filename,
-                await people_file.read(),
+            library = parse_eitan_library_upload(
+                library_file.filename,
+                await library_file.read(),
             )
             created = await db.create_eitan_axis(
                 title=title,
-                keywords_text=keywords_text,
-                people_text=people_text,
+                library_json=library.as_json(),
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
@@ -972,31 +966,71 @@ def create_dashboard_router(
             "eitan_axis_created",
             object_type="eitan_axis",
             object_id=str(created.get("axis_id") or ""),
-            details={"title": created.get("title")},
+            details={"title": created.get("title"), "library": created.get("library")},
         )
         return created
+
+    @router.post("/admin/api/eitan-axes/{axis_id}/library")
+    async def replace_eitan_axis_library(
+        axis_id: str,
+        request: Request,
+        actor: str = Depends(admin_identity),
+        library_file: UploadFile = File(...),
+    ) -> dict[str, Any]:
+        try:
+            library = parse_eitan_library_upload(
+                library_file.filename,
+                await library_file.read(),
+            )
+            updated = await db.update_eitan_axis_library(
+                axis_id,
+                library_json=library.as_json(),
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await audit(
+            request,
+            actor,
+            "eitan_axis_library_replaced",
+            object_type="eitan_axis",
+            object_id=str(axis_id),
+            details={"library": updated.get("library")},
+        )
+        return updated
 
     @router.get("/admin/api/eitan-axes/{axis_id}/messages")
     async def eitan_axis_messages(
         axis_id: str,
-        limit: int = Query(40, ge=1, le=200),
+        limit: int = Query(20, ge=1, le=200),
         offset: int = Query(0, ge=0),
         _: str = Depends(admin_identity),
     ) -> dict[str, Any]:
         axis = await db.get_eitan_axis(axis_id)
         if not axis:
             raise HTTPException(404, "محور پیدا نشد.")
-        terms = db.eitan_search_terms(axis)
+        groups = db.eitan_search_groups(axis)
         result = await db.list_messages_dashboard(
-            terms=terms,
+            term_groups=groups,
             limit=limit,
             offset=offset,
         )
         return {
             **result,
             "axis": eitan_axis_public(axis),
-            "terms_count": len(terms),
+            "terms_count": sum(len(group) for group in groups),
+            "group_count": len(groups),
         }
+
+    @router.get("/admin/api/eitan-axes/{axis_id}/insights")
+    async def eitan_axis_insights(
+        axis_id: str,
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        axis = await db.get_eitan_axis(axis_id)
+        if not axis:
+            raise HTTPException(404, "محور پیدا نشد.")
+        insights = await db.eitan_axis_insights(axis)
+        return {"axis": eitan_axis_public(axis), **insights}
 
     @router.get("/admin/api/me/profile")
     async def current_admin_profile(

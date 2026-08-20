@@ -29,9 +29,10 @@ from .calendar_dates import report_calendar_labels
 from .config import Settings
 from .persian_text import to_persian_digits
 from .weekday_palette import weekday_palette_for_report
+from .weekday_art import weekday_cover_svg
 
 
-_LAYOUT_VERSION = "garaye-minimal-a3-v9-weekday-palette"
+_LAYOUT_VERSION = "garaye-minimal-a3-v10-weekday-art-events-last"
 _A3_WIDTH_PT = 841.89
 _A3_HEIGHT_PT = 1190.55
 
@@ -175,6 +176,7 @@ def _public_categories(data: BulletinData):
             grouped.append((category, people))
     grouped.sort(
         key=lambda item: (
+            1 if is_event_category(item[0].category_id) or str(item[0].category_id) == "events" else 0,
             0 if not str(item[0].category_id).startswith("custom:") else 1,
             order_index.get(item[0].category_id, 10**9),
             int(item[0].order or 0),
@@ -245,14 +247,17 @@ def _statement_card(
 
 def _cover_sheet(data: BulletinData) -> str:
     dates = report_calendar_labels(data.meta.report_date_jalali)
+    palette = weekday_palette_for_report(data.meta.report_date_jalali)
+    art = weekday_cover_svg(palette)
     return f"""
 <section class="sheet cover-sheet" data-page-kind="cover" aria-label="جلد">
-  <div class="cover-grid-mark" aria-hidden="true"></div>
   <div class="cover-kicker">بولتن تحلیلی گرایه</div>
   <div class="cover-title">خبرنامه<br>گرایه</div>
   <div class="cover-copy">رصد، تحلیل و صورت‌بندی هوشمند جریان خبر</div>
   <div class="cover-meta"><span>شماره {_display(data.meta.issue_number)}</span><i></i><span>{_display(dates['jalali_label'])}</span></div>
   <div class="cover-dates"><span>قمری {_display(dates['hijri_label'])}</span><span>میلادی {_display(dates['gregorian_label'])}</span></div>
+  <div class="cover-day-art" aria-hidden="true">{art}</div>
+  <div class="cover-weekday-chip">{_display(palette.get('name'))} · {_display(palette.get('label'))}</div>
 </section>"""
 
 
@@ -399,7 +404,12 @@ html,body,body *{{direction:rtl;unicode-bidi:plaintext}}
 .page-footer span:last-child{{text-align:left}}.page-footer b{{text-align:center;color:var(--ink);font-size:10.5pt}}
 .cover-sheet{{background:var(--identity-dark);color:#fff;padding:34mm 28mm;display:flex;flex-direction:column;justify-content:center;isolation:isolate}}
 .cover-sheet::before{{content:"";position:absolute;inset:0;background:radial-gradient(circle at 78% 14%,color-mix(in srgb,var(--identity) 45%,transparent),transparent 26%),linear-gradient(125deg,color-mix(in srgb,var(--identity) 22%,transparent),transparent 48%);z-index:-1}}
-.cover-grid-mark{{position:absolute;left:23mm;bottom:27mm;width:74mm;height:74mm;border:1px solid color-mix(in srgb,var(--identity-light) 80%,#fff);border-radius:50%;background:repeating-linear-gradient(90deg,transparent 0 10mm,color-mix(in srgb,var(--identity-light) 55%,transparent) 10.4mm 10.8mm),repeating-linear-gradient(0deg,transparent 0 10mm,color-mix(in srgb,var(--identity-light) 40%,transparent) 10.4mm 10.8mm);transform:rotate(19deg)}}
+.cover-grid-mark{{display:none}}
+.cover-day-art{{position:absolute;left:18mm;bottom:22mm;width:118mm;height:118mm}}
+.cover-day-art svg{{width:100%;height:100%;display:block}}
+.cover-weekday-chip{{position:absolute;right:28mm;bottom:28mm;padding:3mm 6mm;border:1px solid color-mix(in srgb,var(--identity-light) 70%,#fff);border-radius:999px;color:var(--identity-light);font-size:12pt;font-weight:700}}
+.category-title-sheet{{background:var(--paper);display:flex;align-items:center;justify-content:center}}
+.category-title-frame{{position:absolute;inset:36mm 24mm 28mm;display:flex;align-items:center;justify-content:center;border:.7pt solid var(--identity);color:var(--identity-dark);font-size:42pt;font-weight:900;text-align:center;line-height:1.35;padding:12mm}}
 .cover-kicker{{color:var(--identity-light);font-size:12pt;font-weight:700;letter-spacing:.08em}}.cover-title{{margin-top:11mm;font-size:54pt;line-height:1.25;font-weight:900;letter-spacing:-.02em}}.cover-copy{{margin-top:8mm;color:#f7f1ef;font-size:15pt}}.cover-meta{{display:flex;align-items:center;gap:7mm;margin-top:22mm;color:#f3e6e2;font-size:13pt}}.cover-meta i{{display:block;width:1px;height:7mm;background:var(--identity)}}
 .cover-dates{{display:flex;flex-wrap:wrap;gap:8mm;margin-top:8mm;color:var(--identity-light);font-size:12pt}}
 .feature-heading{{position:relative;margin:0 0 11mm;padding:0 0 5mm;border-bottom:.55pt solid var(--fine-line);text-align:center}}
@@ -450,6 +460,16 @@ def _pagination_script() -> str:
   const toPersianDigits = (value) => String(value).replace(/[0-9٠-٩]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹۰۱۲۳۴۵۶۷۸۹"["0123456789٠١٢٣٤٥٦٧٨٩".indexOf(digit)] || digit);
   const safeHtml = (value) => String(value || "").replace(/[&<>\"']/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[character]);
 
+  function categoryTitlePage(categoryId, categoryTitle) {
+    const page = document.createElement("section");
+    page.className = "sheet category-title-sheet";
+    page.dataset.pageKind = "category-title";
+    page.dataset.categoryId = categoryId;
+    page.dataset.tocKey = "category-" + categoryId;
+    page.innerHTML = '<div class="category-title-frame"><span>' + safeHtml(categoryTitle) + '</span></div>' + footerTemplate;
+    publication.appendChild(page);
+    return page;
+  }
   function contentPage(categoryId, categoryTitle, wide=false) {
     const page = document.createElement("section");
     page.className = "sheet content-sheet" + (wide ? " wide" : "");
@@ -548,10 +568,12 @@ def _pagination_script() -> str:
         const categoryId = card.dataset.categoryId || "other";
         const categoryTitle = card.dataset.categoryTitle || "سایر اخبار";
         if (!state) {
+          categoryTitlePage(categoryId, categoryTitle);
           state = {page:contentPage(categoryId, categoryTitle), column:0};
         } else if (state.page.dataset.categoryId !== categoryId) {
-          // Each registry/event section must start on its own page so no card
-          // is dropped under the previous section heading.
+          // Each registry/event section starts with an independent title page
+          // so the category name is never mixed with the previous news block.
+          categoryTitlePage(categoryId, categoryTitle);
           startPage(state, categoryId, categoryTitle);
         }
         if (!seenTocCategories.has(categoryId)) {

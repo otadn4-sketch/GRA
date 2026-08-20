@@ -14,12 +14,14 @@ const state = {
   wordCloudResizeTimer: null, bulletinRuns: [], bulletinOutputPollTimer: null,
   botQueueRecoveryPollTimer: null,
   garayeWordTrendWord: "", personProfileId: null, calendar: {year: null, month: null, selectedDay: null, eventsByDay: new Map(), apiError: ""},
-  streamOffset: 0, streamTotal: 0,
+  streamOffset: 0, streamTotal: 0, streamPage: 1, streamPageSize: 20,
+  bulletinRunsPage: 1, bulletinRunsPageSize: 5,
   jalaliPicker: {input: null, year: null, month: null},
   deskSubjectConfirmed: false,
   quickStart: {step: 1, dateFrom: "", dateTo: "", timeFrom: "00:00", timeTo: "23:59", analyzing: false, analysisDone: false, highAttentionDay: "", outputDay: ""},
   garayeSpeakerFocus: "",
-  eitanAxes: [], eitanAxisId: "", eitanMessages: [], eitanOffset: 0, eitanTotal: 0, eitanCreating: false,
+  eitanAxes: [], eitanAxisId: "", eitanMessages: [], eitanPage: 1, eitanPageSize: 20, eitanTotal: 0, eitanCreating: false,
+  eitanInsights: null,
 };
 const pageMeta = {
   overview: ["تقویم و مناسبت‌ها", ""],
@@ -28,9 +30,9 @@ const pageMeta = {
   finalization: ["نهایی‌سازی خبر", ""],
   monitoring: ["نظارت", ""],
   garaye: ["گرایه", ""],
-  "eitan-gara": ["ایتان گرا", "جست‌وجوی پیام‌ها بر اساس محورهای کلیدواژه و افراد شاخص"],
+  "eitan-gara": ["ایتان گرا", ""],
   "high-attention": ["پربازتاب", ""],
-  bulletins: ["خبرنامه‌ها", "چینش خبرهای نهایی و تولید خروجی‌های انتشار"],
+  bulletins: ["خبرنامه‌ها", ""],
   people: ["شناسنامه اشخاص", "مدیریت نام، سمت، دسته و کانال اشخاص"],
   "person-profile": ["پروفایل شخص", "مشخصات، کانال‌ها و خبرهای منتسب به یک شخص"],
   sources: ["منابع پایش", "کانال‌های اشخاص و گروه‌های پشتیبانی"],
@@ -41,6 +43,45 @@ const pageMeta = {
   "quick-start": ["شروع سریع", ""],
 };
 const fa = new Intl.NumberFormat("fa-IR");
+function renderPager(hostIds, {page, pageCount, total, pageSize, onSelect}) {
+  const bar = $(hostIds.bar);
+  const numbers = $(hostIds.numbers);
+  const hint = $(hostIds.hint);
+  const prev = $(hostIds.prev);
+  const next = $(hostIds.next);
+  if (!bar) return;
+  const count = Math.max(1, Number(pageCount) || 1);
+  const current = Math.min(Math.max(1, Number(page) || 1), count);
+  bar.classList.toggle("hidden", Number(total || 0) <= Number(pageSize || 0) && current <= 1);
+  if (hint) {
+    hint.textContent = Number(total || 0)
+      ? `${n((current - 1) * pageSize + 1)} تا ${n(Math.min(current * pageSize, total))} از ${n(total)}`
+      : "";
+  }
+  if (prev) prev.disabled = current <= 1;
+  if (next) next.disabled = current >= count;
+  if (numbers) {
+    const buttons = [];
+    const windowSize = 5;
+    let start = Math.max(1, current - 2);
+    let end = Math.min(count, start + windowSize - 1);
+    start = Math.max(1, end - windowSize + 1);
+    if (start > 1) buttons.push(1);
+    if (start > 2) buttons.push("…");
+    for (let value = start; value <= end; value += 1) buttons.push(value);
+    if (end < count - 1) buttons.push("…");
+    if (end < count) buttons.push(count);
+    numbers.innerHTML = buttons.map((value) => {
+      if (value === "…") return `<span class="pager-ellipsis">…</span>`;
+      return `<button type="button" class="pager-page${value === current ? " is-active" : ""}" data-page="${value}">${n(value)}</button>`;
+    }).join("");
+    numbers.querySelectorAll("[data-page]").forEach((button) => {
+      button.addEventListener("click", () => onSelect(Number(button.dataset.page)));
+    });
+  }
+  if (prev) prev.onclick = () => current > 1 && onSelect(current - 1);
+  if (next) next.onclick = () => current < count && onSelect(current + 1);
+}
 const dateFormat = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
   weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23",
@@ -1210,6 +1251,43 @@ function renderEitanAxes() {
   host.appendChild(add);
 }
 
+function eitanBarChart(rows, emptyText) {
+  const items = rows || [];
+  if (!items.length) return `<div class="empty-mini">${esc(emptyText)}</div>`;
+  const max = Math.max(...items.map((item) => Number(item.count || 0)), 1);
+  return `<div class="eitan-bar-list">${items.map((item) => `
+    <div class="eitan-bar-row">
+      <b>${esc(item.label)}</b>
+      <span class="eitan-bar-track"><i style="width:${Math.max(6, (Number(item.count || 0) / max) * 100)}%"></i></span>
+      <small>${n(item.count)}</small>
+    </div>`).join("")}</div>`;
+}
+
+function renderEitanCharts() {
+  const host = $("eitanCharts");
+  const workspace = $("eitanWorkspace");
+  if (!host || !workspace) return;
+  const selected = Boolean(state.eitanAxisId);
+  workspace.classList.toggle("hidden", !selected);
+  host.classList.toggle("hidden", !selected);
+  if (!selected) {
+    host.innerHTML = "";
+    return;
+  }
+  const insights = state.eitanInsights || {};
+  const library = insights.library || {};
+  host.innerHTML = `
+    <article class="panel eitan-chart-card"><div class="panel-heading"><h3>روند روزانه</h3></div>${eitanBarChart(insights.daily, "برای این محور هنوز روند روزانه‌ای نیست.")}</article>
+    <article class="panel eitan-chart-card"><div class="panel-heading"><h3>منابع</h3></div>${eitanBarChart(insights.sources, "منبع منطبقی پیدا نشد.")}</article>
+    <article class="panel eitan-chart-card"><div class="panel-heading"><h3>عبارات کتابخانه</h3></div>${eitanBarChart((insights.terms || []).map((item) => ({label: item.label, count: item.count})), "عبارتی در پیام‌ها تکرار نشده است.")}</article>
+    <article class="panel eitan-chart-card"><div class="panel-heading"><h3>${(insights.clusters || []).length ? "دسته‌های کتابخانه" : "کلیدواژه و افراد"}</h3></div>${eitanBarChart((insights.clusters || []).length ? insights.clusters : insights.kinds, "دسته‌بندی کتابخانه برای نمایش موجود نیست.")}</article>
+  `;
+  if ($("eitanLibraryTitle")) $("eitanLibraryTitle").textContent = `کتابخانهٔ «${state.eitanAxes.find((axis) => axis.axis_id === state.eitanAxisId)?.title || "محور"}»`;
+  if ($("eitanLibraryHint")) {
+    $("eitanLibraryHint").textContent = `${n(library.keyword_count || 0)} کلیدواژه · ${n(library.people_count || 0)} فرد · ${n(library.cluster_count || 0)} دسته`;
+  }
+}
+
 function renderEitanMessages() {
   const grid = $("eitanMessageGrid");
   if (!grid) return;
@@ -1231,52 +1309,75 @@ function renderEitanMessages() {
       <div class="message-meta"><span class="message-timestamp"><span>${esc(timestamp.date)}</span><time datetime="${esc(timestamp.raw)}">${esc(timestamp.time)}</time></span><span>${n(item.media_count)} رسانه · ${n(item.link_count)} لینک</span></div>
       <div class="message-actions"><button class="detail-btn" onclick="openMessage(${item.id})">جزئیات</button></div>
     </article>`;
-  }).join("") : `<div class="panel empty-mini">${state.eitanAxisId ? "پیامی مطابق این محور پیدا نشد." : "محور را انتخاب کنید تا پیام‌ها نمایش داده شوند."}</div>`;
+  }).join("") : `<div class="panel empty-mini">${state.eitanAxisId ? "پیامی مطابق این محور پیدا نشد." : ""}</div>`;
+  const pageCount = Math.max(1, Math.ceil(Number(state.eitanTotal || 0) / state.eitanPageSize));
+  renderPager({
+    bar: "eitanPager",
+    numbers: "eitanPageNumbers",
+    hint: "eitanMoreHint",
+    prev: "eitanPrevPage",
+    next: "eitanNextPage",
+  }, {
+    page: state.eitanPage,
+    pageCount,
+    total: state.eitanTotal,
+    pageSize: state.eitanPageSize,
+    onSelect: (page) => {
+      if (page === state.eitanPage) return;
+      state.eitanPage = page;
+      loadEitanMessages().catch((error) => toast(error.message, true));
+    },
+  });
 }
 
-async function loadEitanMessages({append = false} = {}) {
+async function loadEitanMessages() {
   if (!state.eitanAxisId) {
     state.eitanMessages = [];
     state.eitanTotal = 0;
-    state.eitanOffset = 0;
-    if ($("eitanCount")) $("eitanCount").textContent = "محور را انتخاب کنید";
-    $("eitanMoreBar")?.classList.add("hidden");
+    state.eitanPage = 1;
+    state.eitanInsights = null;
+    if ($("eitanCount")) $("eitanCount").textContent = "";
+    if ($("eitanSelectionHint")) $("eitanSelectionHint").textContent = "";
+    renderEitanCharts();
     renderEitanMessages();
     return;
   }
-  const pageSize = 40;
-  if (!append) {
-    state.eitanOffset = 0;
-    state.eitanMessages = [];
-  }
-  const data = await api(`/admin/api/eitan-axes/${encodeURIComponent(state.eitanAxisId)}/messages?limit=${pageSize}&offset=${state.eitanOffset}`);
-  const incoming = data.items || [];
+  const pageSize = state.eitanPageSize;
+  const pageCountGuess = Math.max(1, Math.ceil(Number(state.eitanTotal || 0) / pageSize) || 1);
+  if (state.eitanPage > pageCountGuess) state.eitanPage = pageCountGuess;
+  const offset = (state.eitanPage - 1) * pageSize;
+  const data = await api(`/admin/api/eitan-axes/${encodeURIComponent(state.eitanAxisId)}/messages?limit=${pageSize}&offset=${offset}`);
   state.eitanTotal = Number(data.total || 0);
-  state.eitanMessages = append ? state.eitanMessages.concat(incoming) : incoming;
-  state.eitanOffset = state.eitanMessages.length;
+  const maxPage = Math.max(1, Math.ceil(state.eitanTotal / pageSize) || 1);
+  if (state.eitanPage > maxPage) {
+    state.eitanPage = maxPage;
+    return loadEitanMessages();
+  }
+  state.eitanMessages = data.items || [];
   const axisTitle = data.axis?.title || "محور";
   if ($("eitanCount")) $("eitanCount").textContent = `${n(state.eitanTotal)} پیام برای «${axisTitle}»`;
   if ($("eitanSelectionHint")) {
-    $("eitanSelectionHint").textContent = `${n(data.terms_count || 0)} عبارت از فایل کلیدواژه‌ها و افراد شاخص در همهٔ پیام‌های سامانه جست‌وجو شد.`;
-  }
-  const moreBar = $("eitanMoreBar");
-  if (moreBar) {
-    const remaining = Math.max(0, state.eitanTotal - state.eitanMessages.length);
-    moreBar.classList.toggle("hidden", remaining <= 0);
-    if ($("eitanMoreHint")) {
-      $("eitanMoreHint").textContent = remaining
-        ? `${n(state.eitanMessages.length)} از ${n(state.eitanTotal)} پیام نمایش داده شده است.`
-        : "";
-    }
+    $("eitanSelectionHint").textContent = `${n(data.group_count || 0)} قاعده از کتابخانه در همهٔ پیام‌های سامانه اعمال شد.`;
   }
   renderEitanMessages();
 }
 
+async function loadEitanInsights() {
+  if (!state.eitanAxisId) {
+    state.eitanInsights = null;
+    renderEitanCharts();
+    return;
+  }
+  state.eitanInsights = await api(`/admin/api/eitan-axes/${encodeURIComponent(state.eitanAxisId)}/insights`);
+  renderEitanCharts();
+}
+
 async function selectEitanAxis(axisId) {
   state.eitanAxisId = axisId;
+  state.eitanPage = 1;
   toggleEitanCreate(false);
   renderEitanAxes();
-  await loadEitanMessages();
+  await Promise.all([loadEitanMessages(), loadEitanInsights()]);
 }
 
 async function loadEitanGaraPage() {
@@ -1285,35 +1386,48 @@ async function loadEitanGaraPage() {
   if (state.eitanAxisId && !state.eitanAxes.some((axis) => axis.axis_id === state.eitanAxisId)) {
     state.eitanAxisId = "";
     state.eitanMessages = [];
+    state.eitanInsights = null;
   }
   renderEitanAxes();
-  if (state.eitanAxisId) await loadEitanMessages();
-  else renderEitanMessages();
+  if (state.eitanAxisId) await Promise.all([loadEitanMessages(), loadEitanInsights()]);
+  else {
+    renderEitanCharts();
+    renderEitanMessages();
+  }
 }
 
 async function submitEitanCreate(event) {
   event.preventDefault();
   const title = $("eitanAxisTitle")?.value.trim() || "";
-  const keywords = $("eitanKeywordsFile")?.files?.[0];
-  const people = $("eitanPeopleFile")?.files?.[0];
+  const library = $("eitanLibraryFile")?.files?.[0];
   if (!title) {
     toast("عنوان محور را وارد کنید.", true);
     return;
   }
-  if (!keywords || !people) {
-    toast("هر دو فایل کلیدواژه‌ها و افراد شاخص را انتخاب کنید.", true);
+  if (!library) {
+    toast("فایل کتابخانه را انتخاب کنید.", true);
     return;
   }
   const body = new FormData();
   body.append("title", title);
-  body.append("keywords_file", keywords);
-  body.append("people_file", people);
+  body.append("library_file", library);
   const created = await api("/admin/api/eitan-axes", {method: "POST", body});
   toast(`محور «${created.title}» ثبت شد.`);
   $("eitanCreatePanel")?.reset();
   toggleEitanCreate(false);
   await loadEitanGaraPage();
   if (created.axis_id) await selectEitanAxis(created.axis_id);
+}
+
+async function replaceEitanLibrary(file) {
+  if (!state.eitanAxisId || !file) return;
+  const body = new FormData();
+  body.append("library_file", file);
+  const updated = await api(`/admin/api/eitan-axes/${encodeURIComponent(state.eitanAxisId)}/library`, {method: "POST", body});
+  toast("کتابخانهٔ محور جایگزین شد و جست‌وجو از نو اجرا می‌شود.");
+  state.eitanPage = 1;
+  await loadEitanGaraPage();
+  if (updated.axis_id) await selectEitanAxis(updated.axis_id);
 }
 
 async function loadSources(silent = false) {
@@ -1422,28 +1536,38 @@ async function stopCrawlerFromDashboard() {
   finally { button.textContent = oldText; }
 }
 
-async function loadStream({append = false} = {}) {
+async function loadStream({page} = {}) {
   if (!state.sources.length) await loadSources(true);
-  const pageSize = 200;
-  if (!append) {
-    state.streamOffset = 0;
-    state.messages = [];
-  }
-  const params = streamQueryParams({limit: String(pageSize), offset: String(state.streamOffset)});
+  const pageSize = state.streamPageSize;
+  if (Number.isFinite(Number(page))) state.streamPage = Math.max(1, Number(page));
+  const offset = (state.streamPage - 1) * pageSize;
+  const params = streamQueryParams({limit: String(pageSize), offset: String(offset)});
   const data = await api(`/admin/api/messages?${params}`);
-  const incoming = data.items || [];
   state.streamTotal = Number(data.total || 0);
-  state.messages = append ? state.messages.concat(incoming) : incoming;
-  state.streamOffset = state.messages.length;
-  $("streamCount").textContent = `${n(state.streamTotal)} پیام`;
-  const moreBar = $("streamMoreBar");
-  if (moreBar) {
-    const remaining = Math.max(0, state.streamTotal - state.messages.length);
-    moreBar.classList.toggle("hidden", remaining <= 0);
-    $("streamMoreHint").textContent = remaining
-      ? `${n(state.messages.length)} از ${n(state.streamTotal)} خبر همین فیلتر نمایش داده شده است.`
-      : "";
+  const maxPage = Math.max(1, Math.ceil(state.streamTotal / pageSize) || 1);
+  if (state.streamPage > maxPage) {
+    state.streamPage = maxPage;
+    return loadStream();
   }
+  state.messages = data.items || [];
+  state.streamOffset = offset;
+  $("streamCount").textContent = `${n(state.streamTotal)} پیام`;
+  renderPager({
+    bar: "streamPager",
+    numbers: "streamPageNumbers",
+    hint: "streamMoreHint",
+    prev: "streamPrevPage",
+    next: "streamNextPage",
+  }, {
+    page: state.streamPage,
+    pageCount: maxPage,
+    total: state.streamTotal,
+    pageSize,
+    onSelect: (nextPage) => {
+      if (nextPage === state.streamPage) return;
+      loadStream({page: nextPage}).catch((error) => toast(error.message, true));
+    },
+  });
   renderMessages();
   updateStreamSelectionHint();
 }
@@ -3114,9 +3238,8 @@ async function loadBulletinHighAttentionItems() {
   container.innerHTML = !day
     ? `<div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div>`
     : state.bulletinHighAttentionItems.length ? state.bulletinHighAttentionItems.map((item) => `
-      <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title)}</b><p>${esc(item.summary)}</p></div><input class="bulletin-high-attention-check" type="checkbox" value="${item.high_attention_item_id}" onchange="updateBulletinPreview()"></label>`).join("")
+      <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title)}</b><p>${esc(item.summary)}</p></div><input class="bulletin-high-attention-check" type="checkbox" value="${item.high_attention_item_id}"></label>`).join("")
     : `<div class="empty-mini">برای این روز پربازتاب نهایی‌شده‌ای وجود ندارد.</div>`;
-  updateBulletinPreview();
 }
 
 function selectedBulletinHighAttentionItems() {
@@ -3148,25 +3271,29 @@ function renderBulletinDayPicker() {
     });
   }
   const daySelect = $("bulletinFinalizationDay");
-  daySelect.innerHTML = `<option value="">همهٔ خبرهای نهایی‌شده</option>` + days.map((item) =>
+  daySelect.innerHTML = `<option value="">انتخاب روز</option>` + days.map((item) =>
     `<option value="${esc(item.value)}">${esc(item.label)} · ${n(item.count)} خبر نهایی</option>`
   ).join("");
   daySelect.value = state.bulletinFinalizationDay;
   daySelect.disabled = false;
   syncJalaliFlowInput("bulletinJalaliDate", state.bulletinFinalizationDay);
-  $("bulletinDayHint").textContent = days.length
-    ? "برای نمایش خبرهای نهایی‌شدهٔ یک روز، روز را از فهرست یا تقویم انتخاب کنید؛ خروجی فقط از خبرهایی ساخته می‌شود که خودتان تیک زده‌اید."
-    : "روز را از تقویم انتخاب کنید یا ابتدا خبر را نهایی کنید.";
 }
 
 function renderFinalizedDraftsForDay() {
   const selectedDay = state.bulletinFinalizationDay;
   const drafts = selectedDay
     ? state.bulletinDrafts.filter((draft) => bulletinDayInfo(draft)?.value === selectedDay)
-    : state.bulletinDrafts;
+    : [];
   state.drafts = drafts;
   const toolbar = $("bulletinDraftsToolbar");
   const selectAll = $("selectAllFinalizedDrafts");
+  if (!selectedDay) {
+    toolbar?.classList.add("hidden");
+    if (selectAll) selectAll.checked = false;
+    $("bulletinDraftsSelectionHint").textContent = "";
+    $("finalizedDrafts").innerHTML = `<div class="empty-mini">روز را انتخاب کنید.</div>`;
+    return;
+  }
   if (!drafts.length) {
     toolbar?.classList.add("hidden");
     if (selectAll) selectAll.checked = false;
@@ -3179,7 +3306,6 @@ function renderFinalizedDraftsForDay() {
     : "خبر نهایی در دسترس نیست";
   $("finalizedDrafts").innerHTML = drafts.length ? drafts.map((item, index) => `
     <label class="sortable-item"><span class="drag-handle">⋮⋮</span><div><b>${esc(item.title || `${item.person_name || "خبر"} — ${item.topic_name || "بدون موضوع"}`)}</b><p>${esc(item.person_name)} · ${esc(item.topic_name)} · جزئیات موضع: ${esc(item.detail || item.summary_title || "نامشخص")}</p></div><input class="bulletin-check" type="checkbox" value="${item.draft_id}" data-index="${index}" onchange="syncBulletinSelectAll()"></label>`).join("") : `<div class="empty-mini">هنوز خبر نهایی وجود ندارد.</div>`;
-  updateBulletinPreview();
 }
 
 function selectedFinalDrafts() {
@@ -3189,7 +3315,6 @@ function selectedFinalDrafts() {
 
 function toggleAllFinalizedDrafts(checked) {
   document.querySelectorAll(".bulletin-check").forEach((input) => { input.checked = Boolean(checked); });
-  updateBulletinPreview();
 }
 
 function syncBulletinSelectAll() {
@@ -3197,21 +3322,11 @@ function syncBulletinSelectAll() {
   const selectAll = $("selectAllFinalizedDrafts");
   if (selectAll) {
     selectAll.checked = Boolean(boxes.length) && boxes.every((input) => input.checked);
-    selectAll.indeterminate = boxes.some((input) => input.checked) && !selectAll.checked;
+    selectAll.indeterminate = boxes.some((input) => input.checked) && !boxes.every((input) => input.checked);
   }
-  updateBulletinPreview();
 }
 
-function updateBulletinPreview() {
-  $("previewTitle").textContent = $("bulletinTitle").value || "خبرنامه گرایه";
-  const selected = selectedFinalDrafts();
-  const highAttention = selectedBulletinHighAttentionItems();
-  const newsPreview = selected.map((item, index) => `<article class="preview-news"><h4>${n(index + 1)}. ${esc(item.title || `${item.person_name || "خبر"} — ${item.topic_name || "بدون موضوع"}`)}</h4><p><b>${esc(item.person_name || "")}</b> — ${esc(item.summary_sentence || item.summary_paragraph || "")}</p><small>جزئیات موضع: ${esc(item.detail || item.summary_title || "نامشخص")}</small></article>`).join("");
-  const highAttentionPreview = highAttention.map((item, index) => `<article class="preview-news high-attention-preview"><span class="eyebrow">پربازتاب</span><h4>${n(index + 1)}. ${esc(item.title)}</h4><p>${esc(item.summary)}</p></article>`).join("");
-  $("previewItems").innerHTML = (newsPreview || highAttentionPreview)
-    ? `${newsPreview}${highAttentionPreview}`
-    : `<div class="empty-mini">خبرها یا پربازتاب‌های نهایی انتخاب‌شده اینجا نمایش داده می‌شوند.</div>`;
-}
+function updateBulletinPreview() {}
 
 function bulletinOutputState(run) {
   const stage = String(run.current_stage || "");
@@ -3243,16 +3358,36 @@ async function loadBulletinWorkspace() {
   ]);
   state.bulletinDrafts = drafts;
   state.bulletinRuns = runs;
+  const pageSize = state.bulletinRunsPageSize;
+  const maxPage = Math.max(1, Math.ceil(runs.length / pageSize) || 1);
+  if (state.bulletinRunsPage > maxPage) state.bulletinRunsPage = maxPage;
+  const start = (state.bulletinRunsPage - 1) * pageSize;
+  const pageRuns = runs.slice(start, start + pageSize);
   renderBulletinDayPicker();
   renderFinalizedDraftsForDay();
   await loadBulletinHighAttentionItems();
-  $("bulletinRows").innerHTML = runs.length ? runs.map((run) => `
+  $("bulletinRows").innerHTML = pageRuns.length ? pageRuns.map((run) => `
     <tr>
       <td>${n(run.id)}</td><td>${n(run.issue_number || "—")}</td><td>${fdate(run.created_at)}</td>
       <td><span class="status-pill ${esc(run.status)}">${statusLabel(run.status)}</span><br>${bulletinOutputState(run)}</td>
       <td>${n(run.item_count)}</td><td>${renderBulletinRunActions(run)}</td>
     </tr>`).join("") : `<tr><td colspan="6">هنوز خبرنامه‌ای ساخته نشده است.</td></tr>`;
-  updateBulletinPreview();
+  renderPager({
+    bar: "bulletinPager",
+    numbers: "bulletinPageNumbers",
+    hint: "bulletinPageHint",
+    prev: "bulletinPrevPage",
+    next: "bulletinNextPage",
+  }, {
+    page: state.bulletinRunsPage,
+    pageCount: maxPage,
+    total: runs.length,
+    pageSize,
+    onSelect: (page) => {
+      state.bulletinRunsPage = page;
+      loadBulletinWorkspace().catch((error) => toast(error.message, true));
+    },
+  });
 }
 
 function startBulletinOutputPolling(runId, attempts = 90) {
@@ -3280,15 +3415,16 @@ function startBulletinOutputPolling(runId, attempts = 90) {
 }
 
 async function createManualBulletin() {
+  if (!state.bulletinFinalizationDay) return toast("روز نهایی‌سازی را انتخاب کنید.", true);
   const draftIds = selectedFinalDrafts().map((item) => item.draft_id);
   const highAttentionItemIds = selectedBulletinHighAttentionItems().map((item) => item.high_attention_item_id);
   if (!draftIds.length) return toast("حداقل یک خبر نهایی را انتخاب کنید.", true);
   try {
     const data = await api("/admin/api/editorial-bulletins", {method: "POST", body: JSON.stringify({
-      draft_ids: draftIds, title: $("bulletinTitle").value.trim() || null,
-      issue_number: Number($("bulletinIssue").value) || null, report_mode: $("bulletinMode").value,
+      draft_ids: draftIds, title: "خبرنامه گرایه",
+      issue_number: Number($("bulletinIssue").value) || null, report_mode: "concise",
       high_attention_item_ids: highAttentionItemIds,
-      introduction: $("bulletinIntroduction").value.trim() || null,
+      introduction: null,
     })});
     toast(`خبرنامه ${n(data.run_id)} ثبت شد؛ خروجی‌ها در حال آماده‌سازی هستند.`);
     await loadBulletinWorkspace();
@@ -3915,9 +4051,6 @@ function syncQuickStartWindowToSystem() {
   if ($("garayeFromTime")) $("garayeFromTime").value = timeFrom;
   if ($("garayeToTime")) $("garayeToTime").value = timeTo;
   if ($("garayeRangePreset")) $("garayeRangePreset").value = "custom";
-  if ($("bulletinTitle") && $("qsBulletinTitle")?.value.trim()) $("bulletinTitle").value = $("qsBulletinTitle").value.trim();
-  if ($("bulletinMode") && $("qsBulletinMode")) $("bulletinMode").value = $("qsBulletinMode").value;
-  if ($("bulletinIntroduction") && $("qsBulletinIntroduction")) $("bulletinIntroduction").value = $("qsBulletinIntroduction").value;
 }
 
 function setQuickStartStep(step) {
@@ -4320,9 +4453,10 @@ $("calendarPrevious").addEventListener("click", () => moveCalendarMonth(-1));
 $("calendarNext").addEventListener("click", () => moveCalendarMonth(1));
 $("applyStreamFilters").addEventListener("click", () => {
   state.selectedMessages.clear();
-  loadStream().catch((error) => toast(error.message, true));
+  state.streamPage = 1;
+  loadStream({page: 1}).catch((error) => toast(error.message, true));
 });
-$("streamQuery").addEventListener("keydown", (event) => { if (event.key === "Enter") loadStream(); });
+$("streamQuery").addEventListener("keydown", (event) => { if (event.key === "Enter") { state.streamPage = 1; loadStream({page: 1}); } });
 $("analyzeSelected").addEventListener("click", analyzeSelectedMessages);
 $("selectVisibleMessages").addEventListener("click", selectVisibleMessages);
 $("clearMessageSelection").addEventListener("click", clearMessageSelection);
@@ -4336,7 +4470,12 @@ $("openEitanGara")?.addEventListener("click", () => showPage("eitan-gara"));
 $("backToGarayeFromEitan")?.addEventListener("click", () => showPage("garaye"));
 $("cancelEitanCreate")?.addEventListener("click", () => toggleEitanCreate(false));
 $("eitanCreatePanel")?.addEventListener("submit", (event) => submitEitanCreate(event).catch((error) => toast(error.message, true)));
-$("loadMoreEitan")?.addEventListener("click", () => loadEitanMessages({append: true}).catch((error) => toast(error.message, true)));
+$("eitanReplaceLibraryFile")?.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  replaceEitanLibrary(file).catch((error) => toast(error.message, true));
+});
 $("startEditorialAutomation").addEventListener("click", () => {
   try {
     return editorialAutomationAction(
@@ -4486,7 +4625,6 @@ $("bulletinJalaliDate")?.addEventListener("change", () => {
   renderFinalizedDraftsForDay();
   loadBulletinHighAttentionItems().catch((error) => toast(error.message, true));
 });
-$("bulletinTitle").addEventListener("input", updateBulletinPreview);
 $("showPersonForm").addEventListener("click", () => {
   fillPersonCategorySelects("");
   $("personForm").classList.remove("hidden");
@@ -4664,7 +4802,6 @@ window.viewPerson = viewPerson;
 window.openDraft = openDraft; window.restoreDraftVersion = restoreDraftVersion; window.toggleSource = toggleSource;
 window.saveSourceTitle = saveSourceTitle;
 window.revokeApiKey = revokeApiKey;
-$("loadMoreStream")?.addEventListener("click", () => loadStream({append: true}).catch((error) => toast(error.message, true)));
 $("currentUser")?.addEventListener("click", () => showPage("portal"));
 document.querySelectorAll(".quick-start-nav").forEach((item) => item.addEventListener("click", () => showPage(item.dataset.page)));
 document.querySelectorAll(".qs-step-tab").forEach((tab) => tab.addEventListener("click", () => {

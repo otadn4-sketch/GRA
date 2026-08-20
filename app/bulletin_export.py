@@ -27,6 +27,7 @@ from .config import Settings
 from .db import Database
 from .approved_layout_export import ApprovedLayoutExporter
 from .html_layout_engine import HtmlLayoutExporter
+from .word_rtl import apply_persian_document, apply_persian_run, rtl_paragraph, rtl_table
 
 
 _STATUS_LABELS = {
@@ -38,10 +39,7 @@ _ONE_LINE_BOLD_FONT = "IRZAR-BOLD"
 
 
 def _rtl(paragraph) -> None:
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p_pr = paragraph._p.get_or_add_pPr()
-    if p_pr.find(qn("w:bidi")) is None:
-        p_pr.append(OxmlElement("w:bidi"))
+    rtl_paragraph(paragraph)
 
 
 def _set_run_font(run, size: int = 12, bold: bool = False, *, font_name: str = "B Zar") -> None:
@@ -52,6 +50,7 @@ def _set_run_font(run, size: int = 12, bold: bool = False, *, font_name: str = "
     r_fonts = r_pr.get_or_add_rFonts()
     for attr in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
         r_fonts.set(qn(attr), font_name)
+    apply_persian_run(r_pr)
 
 
 def _set_style_font(style, *, font_name: str, size: int | None = None, bold: bool | None = None) -> None:
@@ -80,6 +79,7 @@ def _configure_document_styles(doc: Document, *, font_name: str) -> None:
     for style in doc.styles:
         if style.type == WD_STYLE_TYPE.TABLE:
             _set_style_font(style, font_name=font_name, size=10)
+    apply_persian_document(doc)
 
 
 def _add_paragraph(doc: Document, text: str = "", *, size: int = 12, bold: bool = False, center: bool = False, font_name: str = "B Zar"):
@@ -155,7 +155,9 @@ def _borderless_table(table) -> None:
         el.set(qn("w:val"), "nil")
         borders.append(el)
     bidi = OxmlElement("w:bidiVisual")
+    bidi.set(qn("w:val"), "1")
     tbl_pr.append(bidi)
+    table.alignment = WD_TABLE_ALIGNMENT.RIGHT
 
 
 def _statement_text(statement: BulletinStatement) -> str:
@@ -382,6 +384,7 @@ class BulletinExporter:
         doc = Document()
         font = self.settings.bulletin_font_name or "B Zar"
         _configure_document_styles(doc, font_name=font)
+        apply_persian_document(doc)
         if self.settings.bulletin_toc_update_on_open:
             _set_update_fields(doc)
         section = doc.sections[0]
