@@ -17,7 +17,7 @@ const state = {
   streamOffset: 0, streamTotal: 0, streamPage: 1, streamPageSize: 20,
   bulletinRunsPage: 1, bulletinRunsPageSize: 5,
   jalaliPicker: {input: null, year: null, month: null},
-  deskSubjectConfirmed: false,
+  deskSubjectConfirmed: false, deskIdentityOverride: null,
   quickStart: {step: 1, dateFrom: "", dateTo: "", timeFrom: "00:00", timeTo: "23:59", analyzing: false, analysisDone: false, highAttentionDay: "", outputDay: ""},
   garayeSpeakerFocus: "",
   eitanAxes: [], eitanAxisId: "", eitanMessages: [], eitanPage: 1, eitanPageSize: 20, eitanTotal: 0, eitanCreating: false,
@@ -2172,10 +2172,9 @@ function invalidateFinalizationWindow() {
   $("finalizationSpecificTopic").innerHTML = `<option value="">همه موضوعات مشخص</option>`;
   $("finalizationWindowHint").textContent = "";
   $("finalizationWindowHint").hidden = true;
-  hideQuickRegistryPrompt();
+  hideDeskIdentityCard();
   renderFinalizationProgress(null);
-  resetDeskSubjectEditorTouch();
-  hideDeskSubjectEditor();
+  resetDeskIdentity();
   renderAnalyzedMessages();
   if (state.page === "finalization" && state.finalizationView === "workbench") renderFinalizationView();
 }
@@ -2205,18 +2204,45 @@ function combineJalaliDateTime(dateId, timeId) {
   return date ? `${date}${time ? ` ${time}` : ""}` : "";
 }
 
+function deskIdentityAction() {
+  return $("deskIdentityAction")?.value || "";
+}
+
+function setDeskIdentityAction(action) {
+  if ($("deskIdentityAction")) $("deskIdentityAction").value = action || "";
+}
+
+function setDeskIdentityStatus(message = "") {
+  const hint = $("deskIdentityStatus");
+  if (hint) hint.textContent = message;
+}
+
+function personInitials(name) {
+  return String(name || "؟").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || "؟";
+}
+
+function personAvatarMarkup(person, name) {
+  const label = person?.full_name || name || "؟";
+  const id = person?.person_id;
+  const img = id ? `<img src="/admin/portraits/${id}" alt="" onerror="this.remove()">` : "";
+  return `${img}<i>${esc(personInitials(label))}</i>`;
+}
+
+function showDeskSection(id, visible) {
+  $(id)?.classList.toggle("hidden", !visible);
+}
+
+function hideDeskIdentityCard() {
+  $("deskIdentityCard")?.classList.add("hidden");
+  closeDeskPersonOptions();
+}
+
 function hideQuickRegistryPrompt() {
-  $("detectedPersonRegistryPrompt").classList.add("hidden");
-  $("quickRegistryPersonForm").dataset.tagId = "";
+  hideDeskIdentityCard();
 }
 
 function hideDeskSubjectEditor() {
-  $("deskSubjectEditor")?.classList.add("hidden");
-  $("deskPersonFields")?.classList.add("hidden");
-  $("deskEventFields")?.classList.add("hidden");
-  $("deskNewPersonBox")?.classList.add("hidden");
-  $("deskPersonMetaFields")?.classList.add("hidden");
-  closeDeskPersonOptions();
+  hideDeskIdentityCard();
 }
 
 function registryPeople() {
@@ -2225,6 +2251,54 @@ function registryPeople() {
 
 function closeDeskPersonOptions() {
   $("deskPersonOptions")?.classList.add("hidden");
+}
+
+function detectedSpeakerTag() {
+  const speaker = $("finalizationSpeaker")?.value;
+  return state.analyzedMessages
+    .flatMap((item) => (item.tags || []).map((tag) => ({...tag, message_id: item.id})))
+    .find((tag) => tag.speaker_name === speaker) || null;
+}
+
+function analyzedSpeakerPosition() {
+  const counts = new Map();
+  for (const item of state.analyzedMessages) {
+    for (const tag of item.tags || []) {
+      const position = String(tag.speaker_position || "").trim();
+      if (position && position !== "نامشخص") counts.set(position, (counts.get(position) || 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "";
+}
+
+function splitAliasList(value) {
+  return String(value || "").split("|").map((item) => item.trim()).filter(Boolean);
+}
+
+function currentDeskPerson(speaker) {
+  if (state.deskIdentityOverride) return state.deskIdentityOverride;
+  const person = findPersonBySpeakerName(speaker);
+  if (person && Number(person.active) !== 0) return person;
+  return null;
+}
+
+function fillKnownIdentity(person, extras = {}) {
+  const name = person.full_name || extras.name || "";
+  const position = extras.position || person.position || "";
+  const category = extras.category || person.category || "";
+  if ($("deskPersonMode")) $("deskPersonMode").value = person.person_id ? "existing" : "new";
+  if ($("deskPersonId")) $("deskPersonId").value = person.person_id ? String(person.person_id) : "";
+  if ($("deskPersonName")) $("deskPersonName").value = name;
+  if ($("deskPersonPosition") && !$("deskPersonPosition").dataset.touched) $("deskPersonPosition").value = position;
+  if ($("deskPersonCategory") && !$("deskPersonCategory").dataset.touched) {
+    fillPersonCategorySelects(category);
+    $("deskPersonCategory").value = category;
+  }
+  if ($("deskIdentityKnownName")) $("deskIdentityKnownName").textContent = name;
+  if ($("deskIdentityKnownMeta")) {
+    $("deskIdentityKnownMeta").textContent = [position, category].filter(Boolean).join(" · ") || "بدون سمت ثبت‌شده";
+  }
+  if ($("deskIdentityAvatar")) $("deskIdentityAvatar").innerHTML = personAvatarMarkup(person, name);
 }
 
 function renderDeskPersonOptions(query = "") {
@@ -2238,15 +2312,17 @@ function renderDeskPersonOptions(query = "") {
   });
   const selectedId = $("deskPersonId")?.value || "";
   const selectedNew = $("deskPersonMode")?.value === "new";
+  const includeNew = deskIdentityAction() === "replace";
+  const newOption = includeNew
+    ? `<button type="button" class="desk-combobox-option desk-combobox-new ${selectedNew ? "active" : ""}" data-desk-person="new">شخص جدید</button>`
+    : "";
   box.innerHTML = [
-    `<button type="button" class="desk-combobox-option desk-combobox-new ${selectedNew ? "active" : ""}" data-desk-person="new">شخص جدید</button>`,
-    ...people.slice(0, 50).map((item) => {
-      const initials = String(item.full_name || "؟").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || "؟";
-      return `<button type="button" class="desk-combobox-option ${String(item.person_id) === selectedId ? "active" : ""}" data-desk-person="${item.person_id}">
-        <span class="person-avatar"><img src="/admin/portraits/${item.person_id}" alt="" onerror="this.remove()"><i>${esc(initials)}</i></span>
+    newOption,
+    ...people.slice(0, 50).map((item) => `
+      <button type="button" class="desk-combobox-option ${String(item.person_id) === selectedId ? "active" : ""}" data-desk-person="${item.person_id}">
+        <span class="person-avatar"><img src="/admin/portraits/${item.person_id}" alt="" onerror="this.remove()"><i>${esc(personInitials(item.full_name))}</i></span>
         <span><b>${esc(item.full_name)}</b><small>${esc([item.position, item.category].filter(Boolean).join(" · ") || "بدون سمت")}</small></span>
-      </button>`;
-    }),
+      </button>`),
   ].join("");
   box.classList.remove("hidden");
   box.querySelectorAll("[data-desk-person]").forEach((button) => {
@@ -2257,18 +2333,6 @@ function renderDeskPersonOptions(query = "") {
   });
 }
 
-function markDeskSubjectUnconfirmed() {
-  state.deskSubjectConfirmed = false;
-  const hint = $("deskSubjectConfirmHint");
-  if (hint) hint.textContent = "برای ذخیره اصلاحات، ثبت مشخصات را بزنید.";
-}
-
-function markDeskSubjectConfirmed(message = "مشخصات ثبت شد.") {
-  state.deskSubjectConfirmed = true;
-  const hint = $("deskSubjectConfirmHint");
-  if (hint) hint.textContent = message;
-}
-
 function applyDeskPersonChoice(value, {fromUser = true} = {}) {
   const search = $("deskPersonSearch");
   if (fromUser && search) search.dataset.touched = "1";
@@ -2276,8 +2340,8 @@ function applyDeskPersonChoice(value, {fromUser = true} = {}) {
     $("deskPersonMode").value = "new";
     $("deskPersonId").value = "";
     if (search) search.value = "شخص جدید";
-    $("deskNewPersonBox")?.classList.remove("hidden");
-    $("deskPersonMetaFields")?.classList.remove("hidden");
+    showDeskSection("deskNewPersonBox", true);
+    showDeskSection("deskPersonMetaFields", true);
     if ($("deskNewPersonName") && !$("deskNewPersonName").dataset.touched) {
       $("deskNewPersonName").value = $("finalizationSpeaker")?.value || "";
     }
@@ -2289,8 +2353,8 @@ function applyDeskPersonChoice(value, {fromUser = true} = {}) {
     $("deskPersonId").value = String(person.person_id);
     $("deskPersonName").value = person.full_name;
     if (search) search.value = person.full_name;
-    $("deskNewPersonBox")?.classList.add("hidden");
-    $("deskPersonMetaFields")?.classList.remove("hidden");
+    showDeskSection("deskNewPersonBox", false);
+    showDeskSection("deskPersonMetaFields", true);
     if ($("deskPersonPosition") && !$("deskPersonPosition").dataset.touched) {
       $("deskPersonPosition").value = person.position || "";
     }
@@ -2300,175 +2364,275 @@ function applyDeskPersonChoice(value, {fromUser = true} = {}) {
     }
   }
   closeDeskPersonOptions();
-  if (fromUser) markDeskSubjectUnconfirmed();
+  if (fromUser) setDeskIdentityStatus("برای ذخیره، ثبت را بزنید.");
 }
 
-function renderDeskSubjectEditor() {
-  const speaker = $("finalizationSpeaker").value;
-  const eventMessageId = Number($("finalizationEvent").value) || null;
+function renderDeskIdentityCard() {
+  const card = $("deskIdentityCard");
+  const speaker = $("finalizationSpeaker")?.value || "";
+  const eventMessageId = Number($("finalizationEvent")?.value) || null;
+  if (!card) return;
   if (!state.finalizationWindowConfirmed || (!speaker && !eventMessageId)) {
-    hideDeskSubjectEditor();
+    hideDeskIdentityCard();
     return;
   }
-  $("deskSubjectEditor").classList.remove("hidden");
+  card.classList.remove("hidden");
+  const action = deskIdentityAction();
+  const tag = detectedSpeakerTag();
+  if ($("deskIdentityTagId")) $("deskIdentityTagId").value = String(tag?.tag_id || "");
+  if ($("deskIdentityMessageId")) $("deskIdentityMessageId").value = String(tag?.message_id || "");
+
   if (eventMessageId) {
     const row = state.analyzedMessages.find((item) => Number(item.id) === eventMessageId) || state.analyzedMessages[0];
     const event = row?.event || {};
-    $("deskSubjectHeading").textContent = "اصلاح مشخصات رویداد";
-    $("deskSubjectHint").textContent = "عنوان، محل و زمان رویداد را بازبینی کنید و سپس ثبت مشخصات را بزنید.";
-    $("deskPersonFields").classList.add("hidden");
-    $("deskEventFields").classList.remove("hidden");
-    $("deskNewPersonBox")?.classList.add("hidden");
-    $("deskPersonMetaFields")?.classList.add("hidden");
-    if (!$("deskEventTitle").dataset.touched) {
+    $("deskIdentityEyebrow").textContent = "رویداد این خبر";
+    $("deskIdentityHeading").textContent = event.title || row?.analysis_event_title || row?.analysis_main_subject || "رویداد";
+    $("deskIdentityHint").textContent = "عنوان، محل و زمان را در صورت نیاز همین‌جا اصلاح کنید. ساخت پیش‌نویس نیاز به ثبت جداگانه ندارد.";
+    showDeskSection("deskIdentityKnown", false);
+    showDeskSection("deskIdentityChoices", false);
+    showDeskSection("deskIdentityForm", false);
+    showDeskSection("deskEventFields", true);
+    if ($("deskEventTitle") && !$("deskEventTitle").dataset.touched) {
       $("deskEventTitle").value = event.title || row?.analysis_event_title || row?.analysis_main_subject || "";
     }
-    if (!$("deskEventLocation").dataset.touched) {
+    if ($("deskEventLocation") && !$("deskEventLocation").dataset.touched) {
       $("deskEventLocation").value = event.location || row?.analysis_event_location || "";
     }
-    if (!$("deskEventTime").dataset.touched) {
+    if ($("deskEventTime") && !$("deskEventTime").dataset.touched) {
       $("deskEventTime").value = event.time || row?.analysis_event_time || "";
     }
     return;
   }
+
+  showDeskSection("deskEventFields", false);
   const speakerRecord = (state.analysisFilters.speakers || []).find((item) => item.speaker_name === speaker);
-  const person = findPersonBySpeakerName(speaker);
-  const tags = state.analyzedMessages.flatMap((item) => item.tags || []);
-  const positionCounts = new Map();
-  for (const tag of tags) {
-    const position = String(tag.speaker_position || "").trim();
-    if (position && position !== "نامشخص") positionCounts.set(position, (positionCounts.get(position) || 0) + 1);
+  const person = currentDeskPerson(speaker);
+  const analyzedPosition = analyzedSpeakerPosition();
+  $("deskIdentityEyebrow").textContent = "گوینده این خبرها";
+
+  if (!action && person) {
+    $("deskIdentityHeading").textContent = person.full_name;
+    $("deskIdentityHint").textContent = state.deskIdentityOverride
+      ? "برای این خبرها این گوینده انتخاب شده است. ساخت پیش‌نویس آزاد است."
+      : "در شناسنامه است. اگر تشخیص مدل غلط بوده، «این شخص نیست» را بزنید.";
+    fillKnownIdentity(person, {position: analyzedPosition || person.position, category: person.category});
+    showDeskSection("deskIdentityKnown", true);
+    showDeskSection("deskIdentityChoices", false);
+    showDeskSection("deskIdentityForm", false);
+    return;
   }
-  const analyzedPosition = [...positionCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "";
-  $("deskSubjectHeading").textContent = "اصلاح مشخصات گوینده";
-  $("deskSubjectHint").textContent = "گوینده را از شناسنامه جست‌وجو کنید یا «شخص جدید» را بسازید؛ سپس ثبت مشخصات را بزنید.";
-  $("deskEventFields").classList.add("hidden");
-  $("deskPersonFields").classList.remove("hidden");
-  if (!$("deskPersonMode")?.value) {
-    if (person) applyDeskPersonChoice(String(person.person_id), {fromUser: false});
-    else applyDeskPersonChoice("new", {fromUser: false});
-  } else if ($("deskPersonMode").value === "new") {
-    $("deskNewPersonBox")?.classList.remove("hidden");
-    $("deskPersonMetaFields")?.classList.remove("hidden");
+
+  if (!action) {
+    $("deskIdentityHeading").textContent = speaker;
+    $("deskIdentityHint").textContent = "این نام در شناسنامه نیست. می‌توانید پیش‌نویس را بسازید، یا هویت را همین‌جا کامل کنید.";
+    $("deskPersonMode").value = "new";
+    $("deskPersonId").value = "";
+    $("deskPersonName").value = speaker;
+    showDeskSection("deskIdentityKnown", false);
+    showDeskSection("deskIdentityChoices", true);
+    showDeskSection("deskIdentityForm", false);
+    return;
+  }
+
+  showDeskSection("deskIdentityKnown", false);
+  showDeskSection("deskIdentityChoices", false);
+  showDeskSection("deskIdentityForm", true);
+  const creating = action === "create" || (action === "replace" && $("deskPersonMode")?.value === "new");
+  showDeskSection("deskNewPersonBox", creating);
+  showDeskSection("deskPersonComboboxWrap", action === "match" || action === "replace");
+  showDeskSection("deskPersonMetaFields", true);
+  if (action === "create") {
+    $("deskIdentityHeading").textContent = "افزودن به شناسنامه";
+    $("deskIdentityHint").textContent = "نام، سمت و دسته را بررسی کنید و ثبت کنید.";
+    $("deskPersonMode").value = "new";
+    if ($("deskNewPersonName") && !$("deskNewPersonName").dataset.touched) $("deskNewPersonName").value = speaker;
+    $("deskPersonName").value = $("deskNewPersonName")?.value.trim() || speaker;
+    if ($("confirmDeskIdentity")) $("confirmDeskIdentity").textContent = canManagePeople() ? "افزودن به شناسنامه" : "ادامه با همین نام";
+  } else if (action === "match") {
+    $("deskIdentityHeading").textContent = "تطبیق با فرد موجود";
+    $("deskIdentityHint").textContent = "فرد درست را پیدا کنید. نام تشخیص‌داده‌شده به‌عنوان نام دیگر ذخیره می‌شود.";
+    if ($("confirmDeskIdentity")) $("confirmDeskIdentity").textContent = "تطبیق و ادامه";
   } else {
-    $("deskNewPersonBox")?.classList.add("hidden");
-    $("deskPersonMetaFields")?.classList.remove("hidden");
+    $("deskIdentityHeading").textContent = "انتخاب گوینده درست";
+    $("deskIdentityHint").textContent = "فرد درست را از شناسنامه انتخاب کنید یا شخص جدید بسازید. این انتخاب برای پیش‌نویس همین خبرها استفاده می‌شود.";
+    if ($("confirmDeskIdentity")) $("confirmDeskIdentity").textContent = "ادامه با این فرد";
   }
-  if (!$("deskPersonPosition").dataset.touched) {
+  if ($("deskPersonPosition") && !$("deskPersonPosition").dataset.touched) {
     $("deskPersonPosition").value = analyzedPosition || person?.position || speakerRecord?.position || "";
   }
-  if (!$("deskPersonCategory").dataset.touched) {
+  if ($("deskPersonCategory") && !$("deskPersonCategory").dataset.touched) {
+    fillPersonCategorySelects(person?.category || "");
     $("deskPersonCategory").value = person?.category || "";
   }
 }
 
-function resetDeskSubjectEditorTouch() {
-  ["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime", "deskNewPersonName", "deskPersonSearch", "deskPersonId", "deskPersonMode"].forEach((id) => {
+function renderDeskSubjectEditor() {
+  renderDeskIdentityCard();
+}
+
+function resetDeskIdentity() {
+  [
+    "deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation",
+    "deskEventTime", "deskNewPersonName", "deskPersonSearch", "deskPersonId", "deskPersonMode",
+    "deskIdentityAction", "deskPersonAliases", "deskIdentityTagId", "deskIdentityMessageId",
+  ].forEach((id) => {
     const field = $(id);
     if (!field) return;
     delete field.dataset.touched;
     if (field.type === "hidden" || field.tagName === "INPUT" || field.tagName === "SELECT") field.value = "";
   });
   state.deskSubjectConfirmed = false;
+  state.deskIdentityOverride = null;
   closeDeskPersonOptions();
-  $("deskNewPersonBox")?.classList.add("hidden");
-  $("deskPersonMetaFields")?.classList.add("hidden");
-  const hint = $("deskSubjectConfirmHint");
-  if (hint) hint.textContent = "";
+  setDeskIdentityStatus("");
+}
+
+function resetDeskSubjectEditorTouch() {
+  resetDeskIdentity();
 }
 
 function canManagePeople() {
   return (state.me?.permissions || []).some((permission) => permission === "*" || permission === "people.manage");
 }
 
-async function confirmDeskSubject() {
-  const eventMessageId = Number($("finalizationEvent").value) || null;
-  if (eventMessageId) {
-    ["deskEventTitle", "deskEventLocation", "deskEventTime"].forEach((id) => {
-      if ($(id)) $(id).dataset.touched = "1";
-    });
-    markDeskSubjectConfirmed("مشخصات رویداد ثبت شد.");
-    toast("مشخصات رویداد ثبت شد.");
-    return;
-  }
-  const mode = $("deskPersonMode")?.value;
+async function promoteDetectedSpeaker(category) {
+  const messageId = Number($("deskIdentityMessageId")?.value);
+  const tagId = Number($("deskIdentityTagId")?.value);
+  if (!messageId || !tagId || !canManagePeople()) return null;
   try {
-    if (mode === "new") {
-      const name = $("deskNewPersonName")?.value.trim() || "";
-      if (!name) return toast("نام شخص جدید را وارد کنید.", true);
+    return await api(`/admin/api/analysis/messages/${messageId}/speakers/${tagId}/promote-person`, {
+      method: "POST",
+      body: JSON.stringify({category: category || null}),
+    });
+  } catch (error) {
+    toast(error.message, true);
+    return null;
+  }
+}
+
+function openDeskIdentityAction(action) {
+  setDeskIdentityAction(action);
+  setDeskIdentityStatus("");
+  if (action === "replace") {
+    $("deskPersonMode").value = "";
+    $("deskPersonId").value = "";
+    if ($("deskPersonSearch")) $("deskPersonSearch").value = "";
+  }
+  if (action === "match") {
+    $("deskPersonMode").value = "";
+    $("deskPersonId").value = "";
+    if ($("deskPersonSearch")) $("deskPersonSearch").value = "";
+    showDeskSection("deskNewPersonBox", false);
+  }
+  renderDeskIdentityCard();
+  if (action === "match" || action === "replace") {
+    $("deskPersonSearch")?.focus();
+  } else {
+    $("deskNewPersonName")?.focus();
+  }
+}
+
+function cancelDeskIdentity() {
+  setDeskIdentityAction("");
+  setDeskIdentityStatus("");
+  if ($("deskPersonSearch")) $("deskPersonSearch").value = "";
+  renderDeskIdentityCard();
+}
+
+async function confirmDeskIdentity() {
+  const action = deskIdentityAction();
+  const speaker = $("finalizationSpeaker")?.value || "";
+  const mode = $("deskPersonMode")?.value;
+  const position = $("deskPersonPosition")?.value.trim() || "";
+  const category = $("deskPersonCategory")?.value.trim() || "";
+  const aliases = splitAliasList($("deskPersonAliases")?.value);
+  try {
+    if (action === "create" || (action === "replace" && mode === "new")) {
+      const name = $("deskNewPersonName")?.value.trim() || speaker;
+      if (!name) return toast("نام را وارد کنید.", true);
       $("deskPersonName").value = name;
+      let person = {full_name: name, position, category, person_id: null};
       if (canManagePeople()) {
+        const extraAliases = [...aliases];
+        if (speaker && speaker !== name) extraAliases.push(speaker);
         const saved = await api("/admin/api/people", {
           method: "POST",
           body: JSON.stringify({
             full_name: name,
-            position: $("deskPersonPosition")?.value.trim() || null,
-            category: $("deskPersonCategory")?.value.trim() || null,
+            position: position || null,
+            category: category || null,
             registry_status: "inside",
             active: true,
-            aliases: [],
+            aliases: extraAliases,
             replace_aliases: true,
           }),
         });
+        await promoteDetectedSpeaker(category);
         await loadReferenceData();
-        applyDeskPersonChoice(String(saved.person_id), {fromUser: false});
-        markDeskSubjectConfirmed("شخص جدید در شناسنامه ثبت شد.");
-        toast("شخص جدید در شناسنامه ثبت شد.");
-        return;
+        person = state.people.find((item) => Number(item.person_id) === Number(saved.person_id)) || {...person, person_id: saved.person_id};
       }
-      markDeskSubjectConfirmed("مشخصات برای تدوین ثبت شد.");
-      toast("مشخصات برای تدوین ثبت شد.");
+      state.deskIdentityOverride = person;
+      setDeskIdentityAction("");
+      renderDeskIdentityCard();
+      toast(canManagePeople() ? "شخص در شناسنامه ثبت شد." : "مشخصات برای پیش‌نویس ثبت شد.");
       return;
     }
-    const personId = Number($("deskPersonId")?.value);
-    const person = state.people.find((item) => Number(item.person_id) === personId);
-    if (!person) return toast("یک گوینده از فهرست شناسنامه انتخاب کنید یا شخص جدید بسازید.", true);
-    $("deskPersonName").value = person.full_name;
-    if (canManagePeople()) {
-      await api("/admin/api/people", {
-        method: "POST",
-        body: JSON.stringify({
-          person_id: personId,
-          full_name: person.full_name,
-          position: $("deskPersonPosition")?.value.trim() || null,
-          category: $("deskPersonCategory")?.value.trim() || null,
-          registry_status: person.registry_status || "inside",
-          active: Number(person.active) !== 0,
-          replace_aliases: false,
-          priority: Number(person.priority || 100),
-        }),
-      });
-      await loadReferenceData();
-      markDeskSubjectConfirmed("اصلاحات شناسنامه ثبت شد.");
-      toast("اصلاحات شناسنامه ثبت شد.");
+    if (action === "match") {
+      const personId = Number($("deskPersonId")?.value);
+      const person = state.people.find((item) => Number(item.person_id) === personId);
+      if (!person) return toast("یک فرد از شناسنامه انتخاب کنید.", true);
+      if (canManagePeople()) {
+        const merged = [...new Set([...splitAliasList(person.aliases), speaker, ...aliases].filter(Boolean))];
+        await api("/admin/api/people", {
+          method: "POST",
+          body: JSON.stringify({
+            person_id: personId,
+            full_name: person.full_name,
+            position: position || person.position || null,
+            category: category || person.category || null,
+            registry_status: person.registry_status || "inside",
+            active: Number(person.active) !== 0,
+            aliases: merged,
+            replace_aliases: true,
+            priority: Number(person.priority || 100),
+          }),
+        });
+        await promoteDetectedSpeaker(category || person.category);
+        await loadReferenceData();
+      }
+      state.deskIdentityOverride = state.people.find((item) => Number(item.person_id) === personId) || person;
+      setDeskIdentityAction("");
+      renderDeskIdentityCard();
+      toast(canManagePeople() ? "تطبیق با شناسنامه انجام شد." : "این فرد برای پیش‌نویس انتخاب شد.");
       return;
     }
-    markDeskSubjectConfirmed("مشخصات برای تدوین ثبت شد.");
-    toast("مشخصات برای تدوین ثبت شد.");
+    if (action === "replace") {
+      const personId = Number($("deskPersonId")?.value);
+      const person = state.people.find((item) => Number(item.person_id) === personId);
+      if (!person) return toast("گوینده درست را از شناسنامه انتخاب کنید.", true);
+      $("deskPersonName").value = person.full_name;
+      $("deskPersonId").value = String(person.person_id);
+      $("deskPersonMode").value = "existing";
+      state.deskIdentityOverride = {
+        ...person,
+        position: position || person.position,
+        category: category || person.category,
+      };
+      setDeskIdentityAction("");
+      renderDeskIdentityCard();
+      toast("گوینده پیش‌نویس به این فرد تغییر کرد.");
+    }
   } catch (error) {
     toast(error.message, true);
   }
 }
 
+async function confirmDeskSubject() {
+  return confirmDeskIdentity();
+}
+
 function renderQuickRegistryPrompt() {
-  const speaker = $("finalizationSpeaker").value;
-  const canManagePeople = (state.me?.permissions || []).some((permission) => permission === "*" || permission === "people.manage");
-  const speakerRecord = (state.analysisFilters.speakers || []).find((item) => item.speaker_name === speaker);
-  const tags = state.analyzedMessages.flatMap((item) => (item.tags || []).map((tag) => ({...tag, message_id: item.id})));
-  const candidate = tags.find((tag) => tag.speaker_name === speaker);
-  const knownInside = state.people.some((person) => person.full_name === speaker && person.registry_status === "inside" && Number(person.active) !== 0);
-  if (!speaker || speaker === "نامشخص" || !candidate || knownInside || !canManagePeople) {
-    hideQuickRegistryPrompt();
-    return;
-  }
-  $("quickRegistryDetectedName").textContent = speaker;
-  $("quickRegistryPersonName").value = speaker;
-  $("quickRegistryPersonPosition").value = candidate.speaker_position || speakerRecord?.position || "";
-  $("quickRegistryPersonCategory").value = "";
-  $("quickRegistryPersonAliases").value = "";
-  $("quickRegistrySourceMessageId").value = String(candidate.message_id || "");
-  $("quickRegistryPersonForm").dataset.tagId = String(candidate.tag_id || "");
-  $("detectedPersonRegistryPrompt").classList.remove("hidden");
+  renderDeskIdentityCard();
 }
 
 function uniqueTagValues(tags, field) {
@@ -2524,8 +2688,7 @@ async function loadAnalyzedMessages() {
   if (!state.finalizationWindowConfirmed || (!speaker && !eventMessageId)) {
     state.analyzedMessages = [];
     state.selectedAnalyzedMessages.clear();
-    hideQuickRegistryPrompt();
-    hideDeskSubjectEditor();
+    hideDeskIdentityCard();
     renderAnalyzedMessages();
     return;
   }
@@ -2540,8 +2703,7 @@ async function loadAnalyzedMessages() {
   state.analyzedMessages = groupAnalyzedMessages(rows);
   state.analyzedMessages.forEach((item) => state.messageSearchTexts.set(Number(item.id), String(item.text || item.caption || "").trim()));
   state.selectedAnalyzedMessages = new Set(state.analyzedMessages.map((item) => Number(item.id)));
-  renderQuickRegistryPrompt();
-  renderDeskSubjectEditor();
+  renderDeskIdentityCard();
   renderAnalyzedMessages();
 }
 
@@ -2557,8 +2719,8 @@ function renderAnalyzedMessages() {
     ? "ابتدا بازهٔ روز و ساعت را تأیید کنید."
     : selectionLabel
     ? isEvent
-      ? "ابتدا مشخصات رویداد را اصلاح کنید؛ سپس برای همین پیام «تدوین پیام» را بزنید."
-      : `ابتدا مشخصات گوینده را اصلاح کنید؛ سپس برای هر پیام اقدام جداگانه انجام دهید. ${n(state.selectedAnalyzedMessages.size)} از ${n(rows.length)} خبر انتخاب شده است.`
+      ? "عنوان و جزئیات رویداد را در کارت بالا در صورت نیاز اصلاح کنید؛ سپس «تدوین پیام» را بزنید."
+      : `${n(state.selectedAnalyzedMessages.size)} از ${n(rows.length)} خبر انتخاب شده است. ساخت پیش‌نویس آزاد است.`
     : "یک گوینده یا رویداد را انتخاب کنید.";
   $("analyzedMessageList").innerHTML = !selectionLabel
     ? `<div class="empty-mini">برای مشاهده خبرها، یک گوینده یا یک رویداد مستقل را از فیلتر بالا انتخاب کنید.</div>`
@@ -3601,7 +3763,7 @@ async function loadPeople() {
 function fillPersonCategorySelects(selected = "") {
   const options = state.personCategories || [];
   const html = [`<option value="">انتخاب دسته</option>`, ...options.map((item) => `<option value="${esc(item)}">${esc(item)}</option>`)].join("");
-  for (const id of ["personCategory", "quickRegistryPersonCategory", "deskPersonCategory", "categoryRenameOld"]) {
+  for (const id of ["personCategory", "deskPersonCategory", "categoryRenameOld"]) {
     const node = $(id);
     if (!node) continue;
     const current = selected || node.value || "";
@@ -4656,20 +4818,23 @@ $("finalizationEvent").addEventListener("change", () => {
 });
 $("finalizationGeneralTopic").addEventListener("change", () => loadAnalyzedMessages().catch((error) => toast(error.message, true)));
 $("finalizationSpecificTopic").addEventListener("change", () => loadAnalyzedMessages().catch((error) => toast(error.message, true)));
-["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime", "deskNewPersonName"].forEach((id) => {
+["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime", "deskNewPersonName", "deskPersonAliases"].forEach((id) => {
   $(id)?.addEventListener("input", (event) => {
     event.currentTarget.dataset.touched = "1";
     if (id === "deskNewPersonName") $("deskPersonName").value = event.currentTarget.value.trim();
-    markDeskSubjectUnconfirmed();
+    setDeskIdentityStatus("برای ذخیره، ثبت را بزنید.");
   });
-  $(id)?.addEventListener("change", () => markDeskSubjectUnconfirmed());
 });
 $("deskPersonSearch")?.addEventListener("focus", () => renderDeskPersonOptions($("deskPersonSearch").value));
 $("deskPersonSearch")?.addEventListener("input", (event) => {
   event.currentTarget.dataset.touched = "1";
   renderDeskPersonOptions(event.currentTarget.value);
 });
-$("confirmDeskSubject")?.addEventListener("click", () => confirmDeskSubject().catch((error) => toast(error.message, true)));
+$("deskWrongPerson")?.addEventListener("click", () => openDeskIdentityAction("replace"));
+$("deskChoiceCreate")?.addEventListener("click", () => openDeskIdentityAction("create"));
+$("deskChoiceMatch")?.addEventListener("click", () => openDeskIdentityAction("match"));
+$("confirmDeskIdentity")?.addEventListener("click", () => confirmDeskIdentity().catch((error) => toast(error.message, true)));
+$("cancelDeskIdentity")?.addEventListener("click", () => cancelDeskIdentity());
 document.addEventListener("click", (event) => {
   if (!$("deskPersonCombobox")?.contains(event.target)) closeDeskPersonOptions();
 });
@@ -4692,31 +4857,6 @@ $("generateBase").addEventListener("click", () => generateDraft("base"));
   ["draftPerson", "draftCategory", "draftTopic", "summaryParagraph", "summarySentence", "summaryTitle", "deskFootnote"].forEach((id) => {
     $(id)?.addEventListener("input", refreshCurrentCandidatePreview);
     $(id)?.addEventListener("change", refreshCurrentCandidatePreview);
-  });
-  $("cancelQuickRegistryPerson").addEventListener("click", hideQuickRegistryPrompt);
-  $("quickRegistryPersonForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const messageId = Number($("quickRegistrySourceMessageId").value);
-    const tagId = Number($("quickRegistryPersonForm").dataset.tagId);
-    if (!messageId || !tagId) return toast("برچسب گوینده برای افزودن به شناسنامه پیدا نشد.", true);
-    const button = $("addDetectedPersonToRegistry");
-    const originalText = button.textContent;
-    button.disabled = true;
-    button.textContent = "در حال افزودن…";
-    try {
-      const result = await api(`/admin/api/analysis/messages/${messageId}/speakers/${tagId}/promote-person`, {
-        method: "POST",
-        body: JSON.stringify({category: $("quickRegistryPersonCategory").value.trim() || null}),
-      });
-      await loadReferenceData();
-      await loadAnalysisFilters();
-      toast(result.created ? "شخص به شناسنامه افزوده و تگ‌های هم‌نام متصل شد." : "شناسنامه موجود به تگ‌های تحلیل‌شده متصل شد.");
-    } catch (error) {
-      toast(error.message, true);
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
   });
 $("createManualBulletin").addEventListener("click", createManualBulletin);
 $("highAttentionDay").addEventListener("change", () => {

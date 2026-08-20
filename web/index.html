@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#008080">
   <title>سامانه خبرنامه گرایه</title>
-  <link rel="stylesheet" href="/admin/assets/app.css?v=12.2.0">
+  <link rel="stylesheet" href="/admin/assets/app.css?v=12.2.1">
 </head>
 <body>
   <div class="app-shell">
@@ -59,7 +59,7 @@
       </nav>
       <div class="sidebar-foot">
           <span class="live-dot"></span>
-        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۲.۲.۰</span></small></div>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۲.۲.۱</span></small></div>
       </div>
     </aside>
 
@@ -202,7 +202,7 @@
 
           <section class="qs-panel hidden" id="qsStep3">
             <article class="panel qs-finalization-hero">
-              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۳ از ۵</span><h3>نهایی‌سازی خبر</h3><p>همین‌جا همهٔ امکانات مرحلهٔ دوم میز تدوین در دسترس است: انتخاب گوینده یا رویداد، اصلاح مشخصات، تدوین هر پیام، ساخت پیش‌نویس و نهایی‌سازی خبر.</p></div></div>
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۳ از ۵</span><h3>نهایی‌سازی خبر</h3><p>همین‌جا همهٔ امکانات مرحلهٔ دوم میز تدوین در دسترس است: انتخاب گوینده یا رویداد، تکمیل هویت در یک کارت، تدوین هر پیام، ساخت پیش‌نویس و نهایی‌سازی خبر.</p></div></div>
             </article>
             <div id="qsDeskHost" class="qs-desk-host"></div>
             <div class="button-row qs-step-nav">
@@ -392,56 +392,65 @@
                 <select id="finalizationSpecificTopic"><option value="">همه موضوعات مشخص</option></select>
               </label>
             </div>
-            <aside id="detectedPersonRegistryPrompt" class="registry-inline-prompt hidden" aria-live="polite">
-              <div class="registry-prompt-copy">
-                <span class="eyebrow">تکمیل شناسنامه</span>
-                <h4>گوینده شناسایی‌شده <b id="quickRegistryDetectedName">—</b> در شناسنامه ثبت نشده است.</h4>
-                <p>اطلاعات استخراج‌شده را بررسی کنید و بدون خروج از نهایی‌سازی، شخص را به شناسنامه بیفزایید.</p>
+            <aside id="deskIdentityCard" class="desk-identity-card hidden" aria-live="polite">
+              <div class="desk-identity-head">
+                <span class="eyebrow" id="deskIdentityEyebrow">گوینده این خبرها</span>
+                <h4 id="deskIdentityHeading">—</h4>
+                <p id="deskIdentityHint"></p>
               </div>
-              <form id="quickRegistryPersonForm" class="quick-registry-form">
-                <input id="quickRegistrySourceMessageId" type="hidden">
-                <div class="form-grid three">
-                  <label>نام کامل<input id="quickRegistryPersonName" required></label>
-                  <label>سمت<input id="quickRegistryPersonPosition" placeholder="در صورت تشخیص در خبر"></label>
-                  <label>دسته<select id="quickRegistryPersonCategory"><option value="">انتخاب دسته</option></select></label>
-                </div>
-                <label>نام‌های دیگر<input id="quickRegistryPersonAliases" placeholder="با | جدا کنید"></label>
-                <div class="button-row"><button type="submit" class="outline-button" id="addDetectedPersonToRegistry">+ افزودن به شناسنامه</button><button type="button" class="text-button" id="cancelQuickRegistryPerson">فعلاً نه</button></div>
-              </form>
-            </aside>
-            <aside id="deskSubjectEditor" class="desk-subject-editor hidden" aria-live="polite">
-              <div class="desk-subject-copy">
-                <h4 id="deskSubjectHeading">اصلاح مشخصات</h4>
-                <p id="deskSubjectHint">گوینده را از شناسنامه انتخاب کنید یا شخص جدید بسازید؛ سپس ثبت را بزنید.</p>
-              </div>
-              <div id="deskPersonFields" class="hidden">
-                <label>نام گوینده
-                  <div class="desk-combobox" id="deskPersonCombobox">
-                    <input id="deskPersonSearch" type="search" autocomplete="off" placeholder="جست‌وجو در شناسنامه یا انتخاب «شخص جدید»">
-                    <div id="deskPersonOptions" class="desk-combobox-options hidden" role="listbox"></div>
+              <input id="deskPersonId" type="hidden">
+              <input id="deskPersonName" type="hidden">
+              <input id="deskPersonMode" type="hidden">
+              <input id="deskIdentityAction" type="hidden">
+              <input id="deskIdentityTagId" type="hidden">
+              <input id="deskIdentityMessageId" type="hidden">
+              <div id="deskIdentityKnown" class="desk-identity-known hidden">
+                <div class="desk-identity-summary">
+                  <span class="person-avatar" id="deskIdentityAvatar"></span>
+                  <div>
+                    <b id="deskIdentityKnownName"></b>
+                    <small id="deskIdentityKnownMeta"></small>
                   </div>
-                </label>
-                <input id="deskPersonId" type="hidden">
-                <input id="deskPersonName" type="hidden">
-                <input id="deskPersonMode" type="hidden">
+                  <button type="button" class="text-button" id="deskWrongPerson">این شخص نیست</button>
+                </div>
+              </div>
+              <div id="deskIdentityChoices" class="desk-identity-choices hidden">
+                <button type="button" class="desk-identity-choice" id="deskChoiceCreate">
+                  <b>افزودن به شناسنامه</b>
+                  <span>همین نام تشخیص‌داده‌شده را ثبت کنید</span>
+                </button>
+                <button type="button" class="desk-identity-choice" id="deskChoiceMatch">
+                  <b>تطبیق با فرد موجود</b>
+                  <span>اگر این همان شخص با نام دیگر است</span>
+                </button>
+              </div>
+              <div id="deskIdentityForm" class="desk-identity-form hidden">
                 <div id="deskNewPersonBox" class="desk-new-person-box hidden">
-                  <b>شخص جدید</b>
-                  <p>نام، سمت و دسته را بنویسید. با ثبت، شخص در شناسنامه ذخیره می‌شود.</p>
                   <label>نام<input id="deskNewPersonName" placeholder="نام کامل گوینده"></label>
+                  <label>نام‌های دیگر<input id="deskPersonAliases" placeholder="با | جدا کنید"></label>
+                </div>
+                <div id="deskPersonComboboxWrap" class="hidden">
+                  <label>جست‌وجو در شناسنامه
+                    <div class="desk-combobox" id="deskPersonCombobox">
+                      <input id="deskPersonSearch" type="search" autocomplete="off" placeholder="نام فرد را جست‌وجو کنید">
+                      <div id="deskPersonOptions" class="desk-combobox-options hidden" role="listbox"></div>
+                    </div>
+                  </label>
                 </div>
                 <div id="deskPersonMetaFields" class="form-grid two hidden">
                   <label>سمت<input id="deskPersonPosition" placeholder="سمت یا عنوان رسمی"></label>
                   <label>دسته<select id="deskPersonCategory"><option value="">انتخاب دسته</option></select></label>
+                </div>
+                <div class="button-row desk-identity-actions">
+                  <button type="button" class="primary-button" id="confirmDeskIdentity">ثبت</button>
+                  <button type="button" class="ghost-button" id="cancelDeskIdentity">بازگشت</button>
+                  <span id="deskIdentityStatus" class="desk-identity-status"></span>
                 </div>
               </div>
               <div id="deskEventFields" class="form-grid three hidden">
                 <label>عنوان رویداد<input id="deskEventTitle" placeholder="عنوان رویداد"></label>
                 <label>محل رویداد<input id="deskEventLocation" placeholder="محل وقوع"></label>
                 <label>زمان رویداد<input id="deskEventTime" placeholder="زمان وقوع"></label>
-              </div>
-              <div class="button-row desk-subject-actions">
-                <button type="button" class="primary-button" id="confirmDeskSubject">ثبت مشخصات</button>
-                <span id="deskSubjectConfirmHint" class="desk-subject-confirm-hint"></span>
               </div>
             </aside>
             <div class="analysis-selection-bar">
@@ -935,7 +944,7 @@
     <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin/assets/wordcloud-layout.js?v=12.2.0" defer></script>
-  <script src="/admin/assets/app.js?v=12.2.0" defer></script>
+  <script src="/admin/assets/wordcloud-layout.js?v=12.2.1" defer></script>
+  <script src="/admin/assets/app.js?v=12.2.1" defer></script>
 </body>
 </html>

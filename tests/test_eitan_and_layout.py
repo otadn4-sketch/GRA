@@ -205,5 +205,18 @@ class WordRtlTests(unittest.TestCase):
         self.assertIsNotNone(table._tbl.tblPr.find(qn("w:bidiVisual")))
 
 
+class DeskIdentityMarkupTests(unittest.TestCase):
+    def test_workbench_has_one_identity_card(self) -> None:
+        from pathlib import Path
+
+        html = Path("/workspace/web/index.html").read_text(encoding="utf-8")
+        self.assertIn('id="deskIdentityCard"', html)
+        self.assertIn('id="deskWrongPerson"', html)
+        self.assertIn('id="deskChoiceCreate"', html)
+        self.assertIn('id="deskChoiceMatch"', html)
+        self.assertNotIn('id="detectedPersonRegistryPrompt"', html)
+        self.assertNotIn('id="deskSubjectEditor"', html)
+
+
 if __name__ == "__main__":
     unittest.main()

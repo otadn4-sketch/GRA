@@ -380,20 +380,47 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
   .qs-picker-card,.qs-picker-controls,.qs-output-meta,.qs-output-split,.qs-desk-host .analysis-filter-grid{grid-template-columns:1fr}
 }
 
-/* v11.38 — desk subject editor, sources, GapGPT, Garaye charts, API keys */
-.desk-subject-editor{
+/* v11.38 — desk identity card, sources, GapGPT, Garaye charts, API keys */
+.desk-identity-card{
   margin:14px 0 18px;
-  padding:18px;
+  padding:16px 18px;
   border:1px solid rgba(0,128,128,.22);
   border-radius:18px;
   background:linear-gradient(160deg,#fff,#edf8f6);
   display:grid;
   gap:12px;
 }
-.desk-subject-copy h4{margin:0 0 4px;color:#003738;font-size:16px}
-.desk-subject-copy p{margin:0;color:var(--muted);font-size:12px;line-height:1.8}
-.desk-subject-actions{align-items:center;flex-wrap:wrap}
-.desk-subject-confirm-hint{color:var(--muted);font-size:12px}
+.desk-identity-head h4{margin:0 0 4px;color:#003738;font-size:16px}
+.desk-identity-head p{margin:0;color:var(--muted);font-size:12px;line-height:1.8}
+.desk-identity-known{margin:0}
+.desk-identity-summary{
+  display:grid;
+  grid-template-columns:42px minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+  padding:10px 12px;
+  border:1px solid rgba(0,78,79,.14);
+  border-radius:14px;
+  background:#fff;
+}
+.desk-identity-summary b{display:block;color:#003738}
+.desk-identity-summary small{display:block;margin-top:2px;color:var(--muted);font-size:12px}
+.desk-identity-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.desk-identity-choice{
+  display:grid;gap:4px;text-align:right;
+  padding:12px 14px;border:1px solid rgba(0,128,128,.28);
+  border-radius:14px;background:#fff;color:#003738;cursor:pointer;
+}
+.desk-identity-choice:hover{border-color:#008080;background:#edf8f6}
+.desk-identity-choice b{font-size:13px}
+.desk-identity-choice span{color:var(--muted);font-size:12px;line-height:1.7}
+.desk-identity-form{display:grid;gap:10px}
+.desk-identity-card label{display:grid;gap:6px;color:#003738;font-size:12px}
+.desk-identity-card input,.desk-identity-card select{
+  width:100%;border:1px solid var(--line);border-radius:11px;padding:8px 10px;background:#fff;color:var(--ink);
+}
+.desk-identity-actions{align-items:center;flex-wrap:wrap}
+.desk-identity-status{color:var(--muted);font-size:12px}
 .desk-combobox{position:relative}
 .desk-combobox input{width:100%;border:1px solid var(--line);border-radius:11px;padding:9px 11px;background:#fff}
 .desk-combobox-options{
@@ -415,6 +442,10 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 }
 .desk-new-person-box b{color:#003738}
 .desk-new-person-box p{margin:0;color:var(--muted);font-size:12px}
+@media(max-width:850px){
+  .desk-identity-choices,.desk-identity-summary{grid-template-columns:1fr}
+  .desk-identity-summary .text-button{justify-self:start}
+}
 .source-title-edit{display:flex;gap:8px;align-items:center;margin-top:10px}
 .source-title-edit input{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:7px 10px}
 .garaye-filter-card{
