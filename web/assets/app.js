@@ -1263,6 +1263,109 @@ function eitanBarChart(rows, emptyText) {
     </div>`).join("")}</div>`;
 }
 
+function eitanCard(title, body, wide = false) {
+  return `<article class="panel eitan-chart-card${wide ? " is-wide" : ""}"><div class="panel-heading"><h3>${esc(title)}</h3></div>${body}</article>`;
+}
+
+function eitanColumnChart(rows, emptyText) {
+  const items = (rows || []).slice(0, 10);
+  if (!items.length) return `<div class="empty-mini">${esc(emptyText)}</div>`;
+  const width = 1000;
+  const height = 280;
+  const pad = {top: 18, right: 18, bottom: 78, left: 48};
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const max = Math.max(1, ...items.map((item) => Number(item.count || 0)));
+  const slot = plotWidth / items.length;
+  const barWidth = Math.max(18, slot * 0.58);
+  const bars = items.map((item, index) => {
+    const value = Number(item.count || 0);
+    const barHeight = (value / max) * plotHeight;
+    const x = pad.left + index * slot + (slot - barWidth) / 2;
+    const y = pad.top + plotHeight - barHeight;
+    const fill = GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length];
+    return `<g>
+      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(2, barHeight).toFixed(1)}" rx="8" fill="${fill}">
+        <title>${esc(item.label)}: ${n(value)}</title>
+      </rect>
+      <text x="${(x + barWidth / 2).toFixed(1)}" y="${height - 52}" class="trend-axis-label eitan-col-label">${esc(item.label)}</text>
+      <text x="${(x + barWidth / 2).toFixed(1)}" y="${Math.max(pad.top + 12, y - 8).toFixed(1)}" class="trend-axis-label eitan-col-value">${n(value)}</text>
+    </g>`;
+  }).join("");
+  return `<svg class="trend-svg eitan-column-svg" viewBox="0 0 ${width} ${height}" role="img">${bars}</svg>`;
+}
+
+function eitanHeatmapChart(payload, emptyText) {
+  const matrix = payload?.matrix || [];
+  const cols = payload?.cols || [];
+  if (!matrix.length || !cols.length) return `<div class="empty-mini">${esc(emptyText)}</div>`;
+  const max = Math.max(1, ...matrix.flatMap((row) => (row.cells || []).map((cell) => Number(cell.count || 0))));
+  const head = `<tr><th></th>${cols.map((col) => `<th>${esc(col)}</th>`).join("")}</tr>`;
+  const body = matrix.map((row) => `<tr><th>${esc(row.row)}</th>${(row.cells || []).map((cell) => {
+    const value = Number(cell.count || 0);
+    const share = value / max;
+    const background = `hsla(174, ${38 + share * 42}%, ${96 - share * 52}%, 1)`;
+    const color = share > 0.55 ? "#f7fffe" : "#073c3d";
+    return `<td style="background:${background};color:${color}">${value ? n(value) : "—"}</td>`;
+  }).join("")}</tr>`).join("");
+  return `<div class="eitan-heatmap"><table>${head}${body}</table></div>`;
+}
+
+function eitanSankeyChart(links, emptyText) {
+  const items = (links || []).filter((item) => item.source && item.target && Number(item.count || 0) > 0);
+  if (!items.length) return `<div class="empty-mini">${esc(emptyText)}</div>`;
+  const sources = [...new Set(items.map((item) => item.source))];
+  const targets = [...new Set(items.map((item) => item.target))];
+  const width = 1000;
+  const height = Math.max(260, Math.max(sources.length, targets.length) * 42 + 48);
+  const leftX = 28;
+  const rightX = 780;
+  const yAt = (list, index) => (list.length === 1 ? height / 2 : 28 + index * ((height - 56) / Math.max(list.length - 1, 1)));
+  const max = Math.max(1, ...items.map((item) => Number(item.count || 0)));
+  const paths = items.map((item, index) => {
+    const y1 = yAt(sources, sources.indexOf(item.source));
+    const y2 = yAt(targets, targets.indexOf(item.target));
+    const stroke = 6 + (Number(item.count || 0) / max) * 18;
+    const color = GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length];
+    return `<path d="M 190 ${y1.toFixed(1)} C 430 ${y1.toFixed(1)}, 570 ${y2.toFixed(1)}, 780 ${y2.toFixed(1)}" fill="none" stroke="${color}" stroke-width="${stroke.toFixed(1)}" stroke-opacity="0.42">
+      <title>${esc(item.source)} ← ${esc(item.target)}: ${n(item.count)}</title>
+    </path>`;
+  }).join("");
+  const leftNodes = sources.map((label, index) => `<g>
+    <rect x="${leftX}" y="${(yAt(sources, index) - 14).toFixed(1)}" width="150" height="28" rx="10" fill="#edf8f6" stroke="rgba(0,78,79,.16)"/>
+    <text x="${leftX + 75}" y="${(yAt(sources, index) + 5).toFixed(1)}" class="eitan-flow-label">${esc(label)}</text>
+  </g>`).join("");
+  const rightNodes = targets.map((label, index) => `<g>
+    <rect x="${rightX}" y="${(yAt(targets, index) - 14).toFixed(1)}" width="190" height="28" rx="10" fill="#fff7ed" stroke="rgba(0,78,79,.16)"/>
+    <text x="${rightX + 95}" y="${(yAt(targets, index) + 5).toFixed(1)}" class="eitan-flow-label">${esc(label)}</text>
+  </g>`).join("");
+  return `<svg class="trend-svg eitan-sankey-svg" viewBox="0 0 ${width} ${height}" role="img">${paths}${leftNodes}${rightNodes}</svg>`;
+}
+
+function renderEitanTreemap(hostId, rows, emptyText) {
+  const host = $(hostId);
+  if (!host) return;
+  const items = (rows || [])
+    .map((item) => ({name: item.label || item.name, value: Number(item.count || item.value || 0)}))
+    .filter((item) => item.name && item.value > 0);
+  if (!items.length) {
+    host.innerHTML = `<div class="garaye-treemap-empty">${esc(emptyText)}</div>`;
+    return;
+  }
+  const width = 1000;
+  const height = 420;
+  const maxValue = Math.max(1, ...items.map((item) => item.value));
+  const cells = layoutTreemap(items, width, height);
+  host.innerHTML = cells.map((cell, index) => {
+    const share = cell.value / maxValue;
+    const fill = GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length];
+    const ink = share > 0.42 ? "#f7fffe" : "#073c3d";
+    const showLabel = cell.w > 78 && cell.h > 36;
+    const showCount = cell.w > 96 && cell.h > 58;
+    return `<div class="garaye-treemap-cell" title="${esc(cell.name)} · ${n(cell.value)}" style="left:${(cell.x / width) * 100}%;top:${(cell.y / height) * 100}%;width:${(cell.w / width) * 100}%;height:${(cell.h / height) * 100}%;background:${fill};color:${ink};opacity:${0.72 + share * 0.28}">${showLabel ? `<b>${esc(cell.name)}</b>${showCount ? `<small>${n(cell.value)}</small>` : ""}` : ""}</div>`;
+  }).join("");
+}
+
 function renderEitanCharts() {
   const host = $("eitanCharts");
   const workspace = $("eitanWorkspace");
@@ -1276,15 +1379,47 @@ function renderEitanCharts() {
   }
   const insights = state.eitanInsights || {};
   const library = insights.library || {};
-  host.innerHTML = `
-    <article class="panel eitan-chart-card"><div class="panel-heading"><h3>روند روزانه</h3></div>${eitanBarChart(insights.daily, "برای این محور هنوز روند روزانه‌ای نیست.")}</article>
-    <article class="panel eitan-chart-card"><div class="panel-heading"><h3>منابع</h3></div>${eitanBarChart(insights.sources, "منبع منطبقی پیدا نشد.")}</article>
-    <article class="panel eitan-chart-card"><div class="panel-heading"><h3>عبارات کتابخانه</h3></div>${eitanBarChart((insights.terms || []).map((item) => ({label: item.label, count: item.count})), "عبارتی در پیام‌ها تکرار نشده است.")}</article>
-    <article class="panel eitan-chart-card"><div class="panel-heading"><h3>${(insights.clusters || []).length ? "دسته‌های کتابخانه" : "کلیدواژه و افراد"}</h3></div>${eitanBarChart((insights.clusters || []).length ? insights.clusters : insights.kinds, "دسته‌بندی کتابخانه برای نمایش موجود نیست.")}</article>
-  `;
+  const keywordRows = insights.keywords || insights.terms || [];
+  const personRows = insights.people || [];
+  const cards = [
+    eitanCard("روند منحنی روزانه", `<div id="eitanTrendChart" class="trend-chart"></div><div id="eitanTrendLegend" class="trend-legend"></div>`, true),
+    eitanCard("کلیدواژه‌های پرتکرار", eitanColumnChart(keywordRows, "کلیدواژه‌ای در پیام‌ها تکرار نشده است.")),
+    eitanCard("افراد پرتکرار", eitanColumnChart(personRows, "نامی از کتابخانه افراد در پیام‌ها پیدا نشد.")),
+    eitanCard("نقشه درختی دسته‌ها", `<div id="eitanCategoryTreemap" class="garaye-treemap eitan-treemap"></div>`, true),
+    eitanCard("نقشه حرارتی دسته و زیردسته", eitanHeatmapChart(insights.heatmap, "برای نقشه حرارتی هنوز تقاطع دسته و زیردسته موجود نیست."), true),
+    eitanCard("جریان دسته به زیردسته", eitanSankeyChart(insights.keyword_flow, "جریان دسته به زیردسته ساخته نشد."), true),
+  ];
+  if ((insights.person_flow || []).length) {
+    cards.push(eitanCard("جریان خوشه دید به افراد", eitanSankeyChart(insights.person_flow, "جریان افراد ساخته نشد."), true));
+  } else if ((insights.cluster_flow || []).length) {
+    cards.push(eitanCard("جریان خوشه به زیرخوشه", eitanSankeyChart(insights.cluster_flow, "جریان خوشه‌ها ساخته نشد."), true));
+  }
+  cards.push(eitanCard("منابع", eitanBarChart(insights.sources, "منبع منطبقی پیدا نشد.")));
+  cards.push(eitanCard("نهادها", eitanBarChart(insights.institutions, "نهادی از کتابخانه افراد در پیام‌ها نیامده است.")));
+  if ((insights.roles || []).length) cards.push(eitanCard("نقش‌ها", eitanBarChart(insights.roles, "نقشی برای نمایش نیست.")));
+  if ((insights.clusters || []).length) {
+    cards.push(eitanCard("نقشه درختی خوشه‌های دید", `<div id="eitanClusterTreemap" class="garaye-treemap eitan-treemap"></div>`));
+  }
+  if ((insights.kinds || []).length) cards.push(eitanCard("نوع تطبیق", eitanBarChart(insights.kinds, "")));
+  host.innerHTML = cards.join("");
+  const trend = insights.trend || {};
+  const trendDays = trend.days || (insights.daily || []).map((item) => item.label);
+  const trendSeries = (trend.series || []).filter((item) => Number(item.total || 0) > 0);
+  renderCurvedTrendChart("eitanTrendChart", "eitanTrendLegend", {
+    days: trendDays,
+    series: trendSeries.length ? trendSeries : [{
+      name: "کل پیام‌ها",
+      values: (insights.daily || []).map((item) => Number(item.count || 0)),
+      total: (insights.daily || []).reduce((sum, item) => sum + Number(item.count || 0), 0),
+    }],
+    emptyText: "برای این محور هنوز روند روزانه‌ای نیست.",
+    ariaLabel: "نمودار منحنی روزانه ایتان گرا",
+  });
+  renderEitanTreemap("eitanCategoryTreemap", insights.categories, "دسته‌ای از Keyword_Library در پیام‌ها تکرار نشده است.");
+  renderEitanTreemap("eitanClusterTreemap", insights.clusters, "خوشهٔ دیدی برای نمایش نیست.");
   if ($("eitanLibraryTitle")) $("eitanLibraryTitle").textContent = `کتابخانهٔ «${state.eitanAxes.find((axis) => axis.axis_id === state.eitanAxisId)?.title || "محور"}»`;
   if ($("eitanLibraryHint")) {
-    $("eitanLibraryHint").textContent = `${n(library.keyword_count || 0)} کلیدواژه · ${n(library.people_count || 0)} فرد · ${n(library.cluster_count || 0)} دسته`;
+    $("eitanLibraryHint").textContent = `${n(library.keyword_count || 0)} کلیدواژه · ${n(library.people_count || 0)} فرد · ${n(library.category_count || library.cluster_count || 0)} دسته`;
   }
 }
 
@@ -1375,8 +1510,10 @@ async function loadEitanInsights() {
 async function selectEitanAxis(axisId) {
   state.eitanAxisId = axisId;
   state.eitanPage = 1;
+  state.eitanInsights = null;
   toggleEitanCreate(false);
   renderEitanAxes();
+  renderEitanCharts();
   await Promise.all([loadEitanMessages(), loadEitanInsights()]);
 }
 

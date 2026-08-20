@@ -547,6 +547,18 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 .eitan-workspace{display:grid;gap:16px}
 .eitan-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .eitan-chart-card{margin:0}
+.eitan-chart-card.is-wide{grid-column:1 / -1}
+.eitan-treemap{height:clamp(240px,28vw,380px);margin-top:8px}
+.eitan-column-svg .eitan-col-label{text-anchor:middle;font-size:11px;transform-box:fill-box;transform-origin:center;transform:rotate(-28deg)}
+.eitan-column-svg .eitan-col-value{text-anchor:middle;font-size:11px}
+.eitan-heatmap{overflow:auto;margin-top:8px}
+.eitan-heatmap table{width:100%;border-collapse:separate;border-spacing:4px;min-width:520px}
+.eitan-heatmap th,.eitan-heatmap td{
+  padding:8px 10px;border-radius:10px;text-align:center;font-size:12px;font-weight:700;
+}
+.eitan-heatmap th{color:#004e4f;background:#edf8f6}
+.eitan-sankey-svg{min-height:220px}
+.eitan-flow-label{text-anchor:middle;font-size:12px;fill:#003738;font-family:IRZarWeb,IRZar,"B Zar",Tahoma,Arial,sans-serif}
 .eitan-bar-list{display:grid;gap:8px}
 .eitan-bar-row{display:grid;grid-template-columns:minmax(90px,.7fr) minmax(80px,1.4fr) auto;gap:8px;align-items:center;font-size:12px}
 .eitan-bar-row b{font-size:12px}
@@ -562,6 +574,7 @@ body,.workspace,.page-wrap{background:linear-gradient(135deg,#e2efed 0%,#eef7f5 
 .bulletin-grid{grid-template-columns:1fr!important}
 @media(max-width:850px){
   .eitan-charts{grid-template-columns:1fr}
+  .eitan-chart-card.is-wide{grid-column:auto}
   .eitan-bar-row{grid-template-columns:1fr}
 }
 

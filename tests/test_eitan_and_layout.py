@@ -5,7 +5,11 @@ from io import BytesIO
 
 from openpyxl import Workbook
 
-from app.eitan_library import eitan_search_groups, parse_eitan_library_upload
+from app.eitan_library import (
+    build_eitan_insights,
+    eitan_search_groups,
+    parse_eitan_library_upload,
+)
 from app.html_layout_engine import _public_categories
 from app.bulletin_models import (
     BulletinCategory,
@@ -30,24 +34,115 @@ def _xlsx(rows: list[list[object]], sheet: str = "کتابخانه") -> bytes:
     return buffer.getvalue()
 
 
+def _structured_library_xlsx() -> bytes:
+    workbook = Workbook()
+    keywords = workbook.active
+    keywords.title = "Keyword_Library"
+    keywords.append(
+        [
+            "keyword_id",
+            "canonical_term",
+            "aliases",
+            "category",
+            "subcategory",
+            "priority",
+            "helper_terms",
+            "search_query",
+        ]
+    )
+    keywords.append(
+        [
+            "k1",
+            "تنگه هرمز",
+            "هرمز|تنگه",
+            "امنیت دریایی",
+            "عبور کشتی",
+            5,
+            "نفتکش",
+            '"بندرعباس"',
+        ]
+    )
+    keywords.append(
+        ["k2", "خاموشی", "قطع برق", "انرژی", "برق", 2, "", "خاموشی"]
+    )
+    people = workbook.create_sheet("Person_Library")
+    people.append(
+        [
+            "person_id",
+            "canonical_name",
+            "aliases",
+            "role",
+            "institution",
+            "view_cluster",
+            "subcluster",
+            "topic_keywords",
+            "priority",
+            "source_scope",
+            "search_query",
+        ]
+    )
+    people.append(
+        [
+            "p1",
+            "عباس عراقچی",
+            "عراقچی",
+            "وزیر",
+            "وزارت خارجه",
+            "سیاست خارجی",
+            "مذاکره",
+            "برجام",
+            4,
+            "رسانه ملی",
+            "عباس عراقچی",
+        ]
+    )
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
 class EitanLibraryTests(unittest.TestCase):
-    def test_paired_keyword_and_person_become_and_groups(self) -> None:
-        payload = _xlsx(
-            [
-                ["کلیدواژه", "فرد", "دسته", "وزن"],
-                ["تنگه هرمز", "عباس عراقچی", "امنیت دریایی", 3],
-                ["نفتکش", "حسین سلامی", "امنیت دریایی", 2],
-                ["خاموشی", "", "برق", 1],
-            ]
-        )
-        library = parse_eitan_library_upload("library.xlsx", payload)
-        self.assertTrue(library.paired)
+    def test_keyword_and_person_library_sheets(self) -> None:
+        library = parse_eitan_library_upload("library.xlsx", _structured_library_xlsx())
+        self.assertEqual(library.sheets, ["Keyword_Library", "Person_Library"])
         self.assertIn("تنگه هرمز", library.keywords)
         self.assertIn("عباس عراقچی", library.people)
-        self.assertEqual(library.clusters[0]["name"], "امنیت دریایی")
-        groups = eitan_search_groups(library)
-        self.assertIn(["تنگه هرمز", "عباس عراقچی"], groups)
-        self.assertIn(["خاموشی"], groups)
+        self.assertEqual(library.keyword_records[0].category, "امنیت دریایی")
+        self.assertEqual(library.person_records[0].institution, "وزارت خارجه")
+        terms = [term for group in eitan_search_groups(library) for term in group]
+        self.assertIn("تنگه هرمز", terms)
+        self.assertIn("هرمز", terms)
+        self.assertIn("بندرعباس", terms)
+        self.assertIn("عباس عراقچی", terms)
+        self.assertIn("عراقچی", terms)
+        self.assertIn("برجام", terms)
+
+    def test_library_insights_use_sheet_dimensions(self) -> None:
+        library = parse_eitan_library_upload("library.xlsx", _structured_library_xlsx())
+        insights = build_eitan_insights(
+            library,
+            [
+                {
+                    "day": "1405/05/26",
+                    "source": "منبع الف",
+                    "message_type": "text",
+                    "haystack": "عبور از تنگه هرمز و موضع عباس عراقچی",
+                },
+                {
+                    "day": "1405/05/27",
+                    "source": "منبع ب",
+                    "message_type": "photo",
+                    "haystack": "خاموشی گسترده در چند استان",
+                },
+            ],
+        )
+        self.assertGreaterEqual(insights["matched_count"], 2)
+        self.assertTrue(insights["keywords"])
+        self.assertTrue(insights["people"])
+        self.assertTrue(insights["categories"])
+        self.assertTrue(insights["heatmap"]["matrix"])
+        self.assertTrue(insights["keyword_flow"])
+        self.assertTrue(insights["trend"]["series"])
 
     def test_single_column_stays_or_search(self) -> None:
         payload = _xlsx([["کلیدواژه"], ["هرمز"], ["نفتکش"]])

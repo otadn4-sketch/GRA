@@ -26,9 +26,10 @@ from .auth import (
     verify_password,
 )
 from .eitan_library import (
+    EITAN_INSIGHT_SAMPLE_LIMIT,
     EITAN_SEARCH_GROUP_LIMIT,
     EITAN_SEARCH_TERM_LIMIT,
-    eitan_chart_terms,
+    build_eitan_insights,
     eitan_search_groups as build_eitan_search_groups,
     library_from_axis,
     library_from_parts,
@@ -2739,12 +2740,28 @@ class Database:
         empty = {
             "total": 0,
             "sample_size": 0,
+            "matched_count": 0,
             "library": library.summary(),
             "daily": [],
+            "keyword_daily": [],
+            "person_daily": [],
+            "trend": {"days": [], "series": []},
             "sources": [],
             "terms": [],
+            "keywords": [],
+            "people": [],
             "kinds": [],
+            "message_types": [],
             "clusters": [],
+            "categories": [],
+            "subcategories": [],
+            "subclusters": [],
+            "institutions": [],
+            "roles": [],
+            "heatmap": {"rows": [], "cols": [], "matrix": []},
+            "keyword_flow": [],
+            "cluster_flow": [],
+            "person_flow": [],
         }
         if not _append_eitan_search(where, params, groups):
             return empty
@@ -2756,95 +2773,51 @@ class Database:
             f"""
             SELECT COALESCE(m.published_at,m.received_at,m.created_at) AS ts,
                    m.source_chat_title, m.source_chat_username,
+                   IFNULL(m.message_type,'text') AS message_type,
                    IFNULL(m.normalized_text,'') AS normalized_text,
                    IFNULL(m.text,'') AS text,
                    IFNULL(m.caption,'') AS caption,
-                   IFNULL(m.detected_person_name,'') AS detected_person_name
+                   IFNULL(m.detected_person_name,'') AS detected_person_name,
+                   IFNULL(m.sender_name,'') AS sender_name
             FROM messages m
             WHERE {clause}
             ORDER BY COALESCE(m.published_at,m.received_at) DESC, m.id DESC
-            LIMIT 800
+            LIMIT {int(EITAN_INSIGHT_SAMPLE_LIMIT)}
             """,
             params,
         )
         import jdatetime
 
-        day_counts: Counter[str] = Counter()
-        source_counts: Counter[str] = Counter()
-        term_counts: Counter[str] = Counter()
-        kind_counts: Counter[str] = Counter()
-        cluster_counts: Counter[str] = Counter()
-        tracked = eitan_chart_terms(library, limit=28)
-        keyword_set = {canonical_key(term) or term for term in library.keywords}
-        person_set = {canonical_key(term) or term for term in library.people}
-
-        def haystack_of(item: dict[str, Any]) -> str:
-            return normalize_persian(
-                " ".join(
-                    [
-                        str(item.get("normalized_text") or ""),
-                        str(item.get("text") or ""),
-                        str(item.get("caption") or ""),
-                        str(item.get("detected_person_name") or ""),
-                    ]
-                )
-            )
-
+        prepared: list[dict[str, Any]] = []
         for item in sample:
             fields = _tehran_flow_fields(item.get("ts"))
             gregorian = str(fields.get("flow_date") or "")
+            label = gregorian or "نامشخص"
             if gregorian:
                 try:
                     year, month, day = (int(part) for part in gregorian.split("-")[:3])
                     label = jdatetime.date.fromgregorian(date=datetime(year, month, day).date()).strftime("%Y/%m/%d")
                 except (TypeError, ValueError):
                     label = gregorian
-                day_counts[label] += 1
-            source = str(item.get("source_chat_title") or item.get("source_chat_username") or "منبع نامشخص")
-            source_counts[source] += 1
-            haystack = haystack_of(item)
-            matched_kinds: set[str] = set()
-            for tracked_term in tracked:
-                term = str(tracked_term["term"])
-                if term and term in haystack:
-                    term_counts[term] += 1
-                    key = canonical_key(term) or term
-                    if key in person_set:
-                        matched_kinds.add("افراد شاخص")
-                    if key in keyword_set:
-                        matched_kinds.add("کلیدواژه")
-            for kind in matched_kinds:
-                kind_counts[kind] += 1
-            for cluster in library.clusters:
-                name = str(cluster.get("name") or "")
-                cluster_terms = [*(cluster.get("keywords") or []), *(cluster.get("people") or [])]
-                if name and any(str(term) and str(term) in haystack for term in cluster_terms):
-                    cluster_counts[name] += 1
-
-        def top_rows(counter: Counter[str], *, limit: int) -> list[dict[str, Any]]:
-            return [{"label": label, "count": count} for label, count in counter.most_common(limit)]
-
-        term_rows = [
-            {
-                "label": item["term"],
-                "count": int(term_counts.get(item["term"]) or 0),
-                "kind": item["kind"],
-                "weight": item["weight"],
-            }
-            for item in tracked
-            if term_counts.get(item["term"])
-        ]
-        term_rows.sort(key=lambda row: (-int(row["count"]), str(row["label"])))
-        return {
-            "total": int((total_row or {}).get("c") or 0),
-            "sample_size": len(sample),
-            "library": library.summary(),
-            "daily": [{"label": label, "count": day_counts[label]} for label in sorted(day_counts.keys())],
-            "sources": top_rows(source_counts, limit=8),
-            "terms": term_rows[:12],
-            "kinds": top_rows(kind_counts, limit=8),
-            "clusters": top_rows(cluster_counts, limit=8),
-        }
+            prepared.append(
+                {
+                    "day": label,
+                    "source": str(item.get("source_chat_title") or item.get("source_chat_username") or "منبع نامشخص"),
+                    "message_type": str(item.get("message_type") or "text"),
+                    "haystack": " ".join(
+                        [
+                            str(item.get("normalized_text") or ""),
+                            str(item.get("text") or ""),
+                            str(item.get("caption") or ""),
+                            str(item.get("detected_person_name") or ""),
+                            str(item.get("sender_name") or ""),
+                        ]
+                    ),
+                }
+            )
+        insights = build_eitan_insights(library, prepared)
+        insights["total"] = int((total_row or {}).get("c") or 0)
+        return insights
 
     async def revoke_admin_session(self, token: str | None) -> None:
         if token:
