@@ -22,14 +22,14 @@ const state = {
   eitanAxes: [], eitanAxisId: "", eitanMessages: [], eitanOffset: 0, eitanTotal: 0, eitanCreating: false,
 };
 const pageMeta = {
-  overview: ["تقویم و مناسبت‌ها", "تقویم رسمی هجری شمسی و مناسبت‌های روز"],
-  stream: ["جریان اخبار", "جست‌وجو، بررسی و انتخاب پیام‌های دریافت‌شده"],
+  overview: ["تقویم و مناسبت‌ها", ""],
+  stream: ["جریان اخبار", ""],
   automation: ["خودکارسازی", "کنترل مستقل تحلیل هوشمند، کنترل انسانی و کرولر Selenium"],
-  finalization: ["نهایی‌سازی خبر", "تدوین متن پایه، خلاصه‌ها و مدیریت نسخه‌ها"],
-  monitoring: ["نظارت", "آمار ارسال‌کنندگان، روند روزانه و میانگین امتیاز خودکار پیام‌ها"],
-  garaye: ["گرایه", "نبض محتوای تحریریه: موضوع‌ها، واژه‌ها، گویندگان و ایتان گرا"],
+  finalization: ["نهایی‌سازی خبر", ""],
+  monitoring: ["نظارت", ""],
+  garaye: ["گرایه", ""],
   "eitan-gara": ["ایتان گرا", "جست‌وجوی پیام‌ها بر اساس محورهای کلیدواژه و افراد شاخص"],
-  "high-attention": ["پربازتاب", "انتخاب خبرهای نهایی‌شده و تدوین محورهای پربازتاب"],
+  "high-attention": ["پربازتاب", ""],
   bulletins: ["خبرنامه‌ها", "چینش خبرهای نهایی و تولید خروجی‌های انتشار"],
   people: ["شناسنامه اشخاص", "مدیریت نام، سمت، دسته و کانال اشخاص"],
   "person-profile": ["پروفایل شخص", "مشخصات، کانال‌ها و خبرهای منتسب به یک شخص"],
@@ -38,7 +38,7 @@ const pageMeta = {
   "api-keys": ["کلیدهای API", "ساخت و ابطال کلید برای فراخوانی برنامه‌ای سامانه"],
   system: ["وضعیت سامانه", "سلامت اجزا، رویدادها، به‌روزرسانی زنده و پشتیبان‌گیری"],
   portal: ["پرتال کاربری", "نمایه، نقش، آمار ارسال و تنظیمات شخصی حساب شما"],
-  "quick-start": ["شروع سریع", "انجام مرحله‌ای تحلیل، نهایی‌سازی، پربازتاب و خروجی خبرنامه"],
+  "quick-start": ["شروع سریع", ""],
 };
 const fa = new Intl.NumberFormat("fa-IR");
 const dateFormat = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
@@ -426,7 +426,7 @@ function renderCalendarEvents() {
   if (record.holiday && !events.some((event) => /تعطیل/.test(event))) events.unshift("تعطیل رسمی");
   $("calendarEvents").innerHTML = events.length
     ? `<ul>${events.map((event) => `<li>${esc(event)}</li>`).join("")}</ul>`
-    : `<div class="empty-mini">مناسبتی برای این روز در API ثبت نشده است.</div>`;
+    : "";
 }
 function renderCalendar() {
   const {year, month, selectedDay, eventsByDay} = state.calendar;
@@ -625,7 +625,8 @@ function showPage(page, section = "") {
   });
   const [title, subtitle] = pageMeta[page] || pageMeta.overview;
   $("pageTitle").textContent = title;
-  $("pageSubtitle").textContent = subtitle;
+  $("pageSubtitle").textContent = subtitle || "";
+  $("pageSubtitle").hidden = !subtitle;
   closeMobileNav();
   history.replaceState(null, "", `#${page}${section ? `:${section}` : ""}`);
   loadPage(page).catch((error) => toast(error.message, true));
@@ -679,7 +680,7 @@ async function loadPage(page) {
 
 async function loadCurrentUser() {
   state.me = await api("/admin/api/me");
-  $("currentUser").textContent = `${state.me.full_name} · ${state.me.role_title}`;
+  $("currentUser").textContent = "پرتال کاربری";
   if ($("sidebarVersion") && state.me.version) $("sidebarVersion").textContent = faDigits(state.me.version);
   document.querySelectorAll("[data-permission]").forEach((element) => {
     const permissions = state.me.permissions || [];
@@ -748,7 +749,8 @@ function renderMonitoringChart(data, focusDay = null) {
   const activeDays = (data.daily_totals || []).filter((item) => Number(item.count || 0) > 0);
   if (!focusDay) {
     $("monitoringChartTitle").textContent = "روند پیام‌های دریافتی";
-    $("monitoringChartSubtitle").textContent = "روزهای دارای پیام، از راست به چپ نمایش داده می‌شوند؛ برای دیدن سهم ارسال‌کنندگان همان روز، روی ستون آن کلیک کنید.";
+    $("monitoringChartSubtitle").textContent = "";
+    $("monitoringChartSubtitle").hidden = true;
     reset.classList.add("hidden");
     const max = Math.max(1, ...activeDays.map((item) => Number(item.count || 0)));
     chart.className = "monitoring-daily-chart";
@@ -763,7 +765,8 @@ function renderMonitoringChart(data, focusDay = null) {
     ...item, count: Number((item.daily || {})[focusDay] || 0),
   })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
   $("monitoringChartTitle").textContent = `سهم ارسال‌کنندگان در ${monitoringDayLabel(focusDay)}`;
-  $("monitoringChartSubtitle").textContent = "سهم هر ارسال‌کننده از کل پیام‌های همان روز؛ برای بازگشت، دکمهٔ کنار عنوان را بزنید.";
+  $("monitoringChartSubtitle").textContent = "";
+  $("monitoringChartSubtitle").hidden = true;
   reset.classList.remove("hidden");
   chart.className = "monitoring-daily-chart monitoring-share-chart";
   const palette = ["#008080", "#4f46e5", "#c27500", "#8a4a2c", "#0f766e", "#7c3f8d", "#475569"];
@@ -998,10 +1001,10 @@ async function loadGarayeInsights() {
   const trendWords = data.word_trends || [];
   const selected = trendWords.some((item) => item.name === state.garayeWordTrendWord)
     ? state.garayeWordTrendWord
-    : (trendWords[0]?.name || "");
+    : "";
   state.garayeWordTrendWord = selected;
   $("garayeWordTrendSelect").innerHTML = trendWords.length
-    ? trendWords.map((item) => `<option value="${esc(item.name)}" ${item.name === selected ? "selected" : ""}>${esc(item.name)} · ${n(item.count)}</option>`).join("")
+    ? `<option value="">همه واژه‌ها</option>` + trendWords.map((item) => `<option value="${esc(item.name)}" ${item.name === selected ? "selected" : ""}>${esc(item.name)} · ${n(item.count)}</option>`).join("")
     : '<option value="">واژه‌ای موجود نیست</option>';
   renderGarayeWordTrend();
 }
@@ -1050,9 +1053,9 @@ function layoutTreemap(items, width, height) {
 function garayeTreemapItems() {
   const cloud = state.garayeInsights?.word_cloud || [];
   if (cloud.length) {
-    return cloud.slice(0, 48).map((item) => ({name: item.word || item.name, value: Number(item.count || 0)}));
+    return cloud.slice(0, 20).map((item) => ({name: item.word || item.name, value: Number(item.count || 0)}));
   }
-  return (state.garayeInsights?.word_trends || []).slice(0, 48).map((item) => ({
+  return (state.garayeInsights?.word_trends || []).slice(0, 20).map((item) => ({
     name: item.name,
     value: Number(item.count || 0),
   }));
@@ -1091,6 +1094,13 @@ function renderGarayeWordTreemap() {
   });
 }
 
+function setGarayeWordTrendFocus(name) {
+  const next = String(name || "").trim();
+  state.garayeWordTrendWord = state.garayeWordTrendWord === next ? "" : next;
+  if ($("garayeWordTrendSelect")) $("garayeWordTrendSelect").value = state.garayeWordTrendWord;
+  renderGarayeWordTrend();
+}
+
 function renderGarayeWordTrend() {
   const data = state.garayeInsights || {};
   const totals = data.daily_word_totals || [];
@@ -1103,6 +1113,8 @@ function renderGarayeWordTrend() {
     series,
     emptyText: "برای این بازه روند ابرواژگان ثبت نشده است.",
     ariaLabel: "نمودار منحنی روند روزانه ابرواژگان",
+    focusName: state.garayeWordTrendWord,
+    onSelect: setGarayeWordTrendFocus,
   });
   renderGarayeWordTreemap();
   $("garayeWordCloud")?.querySelectorAll(".garaye-word").forEach((button) => {
@@ -1878,7 +1890,8 @@ async function loadAnalysisFilters() {
   ["finalizationSpeaker", "finalizationEvent", "finalizationGeneralTopic", "finalizationSpecificTopic"].forEach((id) => { $(id).disabled = false; });
   state.finalizationWindowConfirmed = true;
   state.finalizationStage = "desk";
-  $("finalizationWindowHint").textContent = "بازه تأیید شد؛ گویندگان، تگ‌ها و رویدادهای مستقل فقط از همین بازه نمایش داده می‌شوند.";
+  $("finalizationWindowHint").textContent = "بازه تأیید شد.";
+  $("finalizationWindowHint").hidden = false;
   renderFinalizationProgress(state.analysisFilters.progress);
   await loadAnalyzedMessages();
   renderFinalizationView();
@@ -1896,7 +1909,8 @@ function invalidateFinalizationWindow() {
   $("finalizationEvent").innerHTML = `<option value="">ابتدا بازه را تأیید کنید</option>`;
   $("finalizationGeneralTopic").innerHTML = `<option value="">همه موضوعات کلی</option>`;
   $("finalizationSpecificTopic").innerHTML = `<option value="">همه موضوعات مشخص</option>`;
-  $("finalizationWindowHint").textContent = "ابتدا روز و ساعت بازه را تعیین و تأیید کنید؛ سپس فهرست اشخاص همان بازه نمایش داده می‌شود.";
+  $("finalizationWindowHint").textContent = "";
+  $("finalizationWindowHint").hidden = true;
   hideQuickRegistryPrompt();
   renderFinalizationProgress(null);
   resetDeskSubjectEditorTouch();
@@ -3014,9 +3028,11 @@ async function loadHighAttentionWorkspace() {
   $("highAttentionDay").innerHTML = `<option value="">انتخاب روز نهایی‌سازی</option>` + days.map((item) => `<option value="${esc(item.day)}">${esc(highAttentionDayLabel(item.day))} · ${n(item.draft_count)} خبر نهایی</option>`).join("");
   $("highAttentionDay").value = state.highAttentionDay;
   syncJalaliFlowInput("highAttentionJalaliDate", state.highAttentionDay);
-  $("highAttentionDayHint").textContent = days.length
-    ? `${n(days.length)} روز دارای خبر نهایی برای بررسی پربازتاب در دسترس است.`
-    : "روز را از تقویم انتخاب کنید یا ابتدا خبر را نهایی کنید.";
+  const hint = $("highAttentionDayHint");
+  if (hint) {
+    hint.textContent = days.length ? `${n(days.length)} روز دارای خبر نهایی` : "";
+    hint.hidden = !hint.textContent;
+  }
   await loadHighAttentionDay();
 }
 

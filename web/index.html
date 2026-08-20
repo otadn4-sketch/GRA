@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#008080">
   <title>سامانه خبرنامه گرایه</title>
-  <link rel="stylesheet" href="/admin/assets/app.css?v=12.0.2">
+  <link rel="stylesheet" href="/admin/assets/app.css?v=12.0.3">
 </head>
 <body>
   <div class="app-shell">
@@ -59,7 +59,7 @@
       </nav>
       <div class="sidebar-foot">
           <span class="live-dot"></span>
-        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۲.۰.۲</span></small></div>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۲.۰.۳</span></small></div>
       </div>
     </aside>
 
@@ -68,7 +68,7 @@
         <button class="icon-button mobile-menu" id="mobileMenu" aria-label="بازکردن منو">☰</button>
         <div>
           <h1 id="pageTitle">تقویم و مناسبت‌ها</h1>
-          <p id="pageSubtitle">تقویم رسمی هجری شمسی و مناسبت‌های روز</p>
+          <p id="pageSubtitle" hidden></p>
         </div>
         <div class="top-actions">
           <button class="current-user" id="currentUser" type="button" title="پرتال کاربری"></button>
@@ -81,7 +81,6 @@
         <section class="page active" id="page-overview">
           <article class="panel calendar-hero">
             <div class="panel-heading calendar-heading">
-              <div><span class="eyebrow">صفحهٔ آغازین</span><h3>تقویم رسمی ایران</h3><p>روزها، تعطیلات رسمی و مناسبت‌های ماه انتخاب‌شده.</p></div>
               <span class="calendar-today-label" id="calendarTodayLabel">در حال دریافت تاریخ…</span>
             </div>
             <div class="jalali-calendar" aria-live="polite">
@@ -147,7 +146,7 @@
         <section class="page" id="page-quick-start">
           <article class="panel quick-start-hero">
             <div class="panel-heading">
-              <div><span class="eyebrow">خبرساز مرحله‌ای</span><h3>شروع سریع</h3><p>همهٔ مراحل خبرساز روی یک صفحه است و با جریان، نهایی‌سازی، پربازتاب و خبرنامه هم‌گام می‌ماند.</p></div>
+              <h3 class="qs-hero-title">خبرساز مرحله‌ای</h3>
               <button type="button" class="text-button" id="resetQuickStart">شروع از ابتدا</button>
             </div>
             <ol class="quick-start-stepper" id="quickStartStepper" aria-label="مراحل شروع سریع">
@@ -161,11 +160,11 @@
 
           <section class="qs-panel" id="qsStep1">
             <article class="panel">
-              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۱ از ۵</span><h3>انتخاب زمان تحلیل</h3><p>روزی را که اخبار آن باید تحلیل شود انتخاب کنید. همین بازه در جریان اخبار و میز تدوین هم اعمال می‌شود.</p></div></div>
+              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ ۱ از ۵</span><h3>انتخاب زمان تحلیل</h3></div></div>
               <div class="qs-window-grid">
                 <article class="qs-window-card">
-                  <header><span class="eyebrow">شروع بازه</span><h4>از تاریخ و ساعت</h4></header>
-                  <label class="field">روز (جلالی)
+                  <header><h4>از تاریخ و ساعت</h4></header>
+                  <label class="field">روز
                     <input id="qsDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date>
                   </label>
                   <label class="field">ساعت ۲۴ساعته
@@ -173,8 +172,8 @@
                   </label>
                 </article>
                 <article class="qs-window-card">
-                  <header><span class="eyebrow">پایان بازه</span><h4>تا تاریخ و ساعت</h4></header>
-                  <label class="field">روز (اختیاری)
+                  <header><h4>تا تاریخ و ساعت</h4></header>
+                  <label class="field">روز
                     <input id="qsDateTo" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="همان روز" autocomplete="off" data-jalali-date>
                   </label>
                   <label class="field">ساعت ۲۴ساعته
@@ -182,7 +181,6 @@
                   </label>
                 </article>
               </div>
-              <p class="qs-sync-note" id="qsWindowHint">با تأیید این مرحله، فیلتر تاریخ و ساعت بخش‌های دیگر سامانه با همین بازه هم‌گام می‌شود.</p>
               <div class="button-row"><button type="button" class="primary-button" id="qsConfirmWindow">تأیید روز و رفتن به تحلیل</button></div>
             </article>
           </section>
@@ -351,11 +349,10 @@
               <div>
                 <span class="eyebrow">میز تدوین · مرحلهٔ ۱ از ۲</span>
                 <h3 id="finalizationRangeTitle">تعیین بازهٔ خبرهای تحلیل‌شده</h3>
-                <p>ابتدا بازه را تأیید کنید. در مرحلهٔ بعد، فقط گویندگان و رویدادهای همین بازه در میز تدوین نمایش داده می‌شوند.</p>
               </div>
             </div>
             <div class="finalization-window">
-              <div class="block-head"><div><h4>بازهٔ خبرهای تحلیل‌شده</h4><p id="finalizationWindowHint">روز و ساعت آغاز و پایان را وارد کنید؛ انتخاب شما در مرحلهٔ میز تدوین حفظ می‌شود.</p></div><button type="button" class="primary-button" id="applyFinalizationWindow">تأیید بازه و ورود به میز تدوین</button></div>
+              <div class="block-head"><div><h4>بازهٔ خبرهای تحلیل‌شده</h4><p id="finalizationWindowHint" hidden></p></div><button type="button" class="primary-button" id="applyFinalizationWindow">تأیید بازه و ورود به میز تدوین</button></div>
               <div class="analysis-filter-grid">
                 <label>از روز<input id="finalizationDateFrom" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۱" autocomplete="off" data-jalali-date></label>
                 <label>ساعت از<input id="finalizationTimeFrom" type="time" dir="ltr" step="60"></label>
@@ -536,21 +533,21 @@
         <section class="page" id="page-monitoring">
           <div class="panel monitoring-head">
             <div class="panel-heading">
-              <div><span class="eyebrow">نظارت</span><h3>نظارت بر ارسال‌کنندگان پیام</h3><p>تاریخچهٔ کامل تعداد ارسال‌ها، روند روزانهٔ بازه و میانگین امتیازهای خودکار هر ارسال‌کننده.</p></div>
+              <div><span class="eyebrow">نظارت</span><h3>نظارت بر ارسال‌کنندگان پیام</h3></div>
               <label class="monitoring-window">بازه نمایش<select id="monitoringDays"><option value="14">۱۴ روز</option><option value="30" selected>۳۰ روز</option><option value="60">۶۰ روز</option><option value="90">۹۰ روز</option></select></label>
             </div>
             <div id="monitoringMetrics" class="metrics-grid"></div>
           </div>
           <div class="content-grid monitoring-layout">
-            <article class="panel"><div class="panel-heading"><div><h3 id="monitoringChartTitle">روند پیام‌های دریافتی</h3><p id="monitoringChartSubtitle">روزهای دارای پیام، از راست به چپ نمایش داده می‌شوند؛ برای دیدن سهم ارسال‌کنندگان همان روز، روی ستون آن کلیک کنید.</p></div><button id="monitoringResetChart" class="text-button hidden" type="button">بازگشت به روند</button></div><div id="monitoringDailyChart" class="monitoring-daily-chart" dir="rtl"></div></article>
+            <article class="panel"><div class="panel-heading"><div><h3 id="monitoringChartTitle">روند پیام‌های دریافتی</h3><p id="monitoringChartSubtitle" hidden></p></div><button id="monitoringResetChart" class="text-button hidden" type="button">بازگشت به روند</button></div><div id="monitoringDailyChart" class="monitoring-daily-chart" dir="rtl"></div></article>
           </div>
-          <article class="panel monitoring-senders-panel"><div class="panel-heading"><div><h3>ارسال‌کنندگان</h3><p>نامی که به پروفایل متصل شده است در اینجا نمایش داده می‌شود. کل پیام و میانگین امتیاز خودکار از همهٔ تاریخچه محاسبه می‌شود.</p></div></div><div class="table-wrap"><table><thead><tr><th>پروفایل / ارسال‌کننده</th><th>نوع</th><th>کل پیام</th><th>پیام‌های امتیازدهی‌شده</th><th>میانگین امتیاز خودکار</th><th>پیام‌ها در بازه و روزها</th></tr></thead><tbody id="monitoringRows"></tbody></table></div></article>
+          <article class="panel monitoring-senders-panel"><div class="panel-heading"><div><h3>ارسال‌کنندگان</h3></div></div><div class="table-wrap"><table><thead><tr><th>پروفایل / ارسال‌کننده</th><th>نوع</th><th>کل پیام</th><th>پیام‌های امتیازدهی‌شده</th><th>میانگین امتیاز خودکار</th><th>پیام‌ها در بازه و روزها</th></tr></thead><tbody id="monitoringRows"></tbody></table></div></article>
         </section>
 
         <section class="page" id="page-garaye">
           <article class="panel eitan-gara-entry">
             <div class="panel-heading">
-              <div><span class="eyebrow">محورهای موضوعی</span><h3>ایتان گرا</h3><p>جست‌وجوی همهٔ پیام‌های سامانه بر اساس فایل کلیدواژه‌ها و افراد شاخص هر محور.</p></div>
+              <h3>ایتان گرا</h3>
               <button type="button" class="primary-button" id="openEitanGara">ایتان گرا</button>
             </div>
           </article>
@@ -601,16 +598,16 @@
           </article>
           <div id="metrics" class="metrics-grid"></div>
           <article class="panel trend-panel">
-            <div class="panel-heading trend-heading"><div><span class="eyebrow">روند موضوعات</span><h3>موضوعات خبرهای نهایی‌شده</h3><p>روند روزانهٔ موضوع‌ها بر پایهٔ زمان نهایی‌سازی خبر است.</p></div><span class="trend-window" id="trendWindow">—</span></div>
+            <div class="panel-heading trend-heading"><h3 class="trend-topics-title">روند موضوعات</h3><span class="trend-window" id="trendWindow">—</span></div>
             <div id="topicTrendChart" class="trend-chart skeleton-box">در حال محاسبه روند موضوعات…</div><div id="topicTrendLegend" class="trend-legend"></div>
           </article>
           <article class="panel garaye-full-panel">
-            <div class="panel-heading"><div><h3>ابرواژگان گرایه</h3><p>واژه‌های محتواییِ پالایش‌شده از خبرهای نهایی؛ واژه‌های عمومی و کم‌معنا حذف شده‌اند.</p></div></div>
+            <div class="panel-heading"><h3>ابرواژگان گرایه</h3></div>
             <div id="garayeWordCloud" class="garaye-word-cloud" aria-live="polite"></div>
           </article>
           <article class="panel garaye-full-panel">
             <div class="panel-heading">
-              <div><h3>روند روزانهٔ ابرواژگان</h3><p>نمودار منحنی همهٔ واژه‌ها را با هم نشان می‌دهد؛ نقشهٔ مستطیلی سهم هر واژه از کل بازه است.</p></div>
+              <h3>روند روزانهٔ ابرواژگان</h3>
               <label class="word-trend-select">واژه برای برجسته‌سازی<select id="garayeWordTrendSelect"><option value="">واژه‌ای موجود نیست</option></select></label>
             </div>
             <div id="garayeWordTrendChart" class="trend-chart">در حال آماده‌سازی نمودار…</div>
@@ -618,7 +615,7 @@
             <div id="garayeWordTreemap" class="garaye-treemap" aria-label="نقشهٔ مستطیلی ابرواژگان"></div>
           </article>
           <article class="panel garaye-full-panel">
-            <div class="panel-heading"><div><h3>ترند گویندگان</h3><p>بر پایهٔ خبرهای نهایی‌شدهٔ هر گوینده؛ با کلیک روی نام یا نمودار، همان گوینده انتخاب می‌شود.</p></div></div>
+            <div class="panel-heading"><h3>ترند گویندگان</h3></div>
             <div id="garayeSpeakerChart" class="trend-chart">در حال آماده‌سازی نمودار…</div>
             <div id="garayeSpeakerLegend" class="trend-legend"></div>
             <div id="garayeSpeakerPeople" class="garaye-speaker-people"></div>
@@ -659,14 +656,22 @@
               <div>
                 <span class="eyebrow">مدل اول · API شماره ۸</span>
                 <h3>تولید محورهای پربازتاب</h3>
-                <p>ابتدا روز نهایی‌سازی را انتخاب کنید، خبرهای همان روز را برگزینید و سپس محورهای پربازتاب را تولید و ویرایش کنید.</p>
               </div>
             </div>
-            <div class="bulletin-day-picker">
-              <label>روز نهایی‌سازی خبرها<select id="highAttentionDay"><option value="">انتخاب روز نهایی‌سازی</option></select></label>
-              <label>انتخاب تقویمی روز<input id="highAttentionJalaliDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date></label>
-              <p id="highAttentionDayHint">روز را از فهرست خبرهای نهایی یا از تقویم انتخاب کنید؛ تایپ دستی تاریخ جلالی هم پذیرفته می‌شود.</p>
+            <div class="stream-filters high-attention-filters">
+              <div class="stream-filter-block">
+                <p class="stream-filter-label">روز نهایی‌سازی</p>
+                <div class="stream-filter-fields stream-filter-window">
+                  <label class="field">روز نهایی‌سازی خبرها
+                    <select id="highAttentionDay"><option value="">انتخاب روز نهایی‌سازی</option></select>
+                  </label>
+                  <label class="field">انتخاب تقویمی روز
+                    <input id="highAttentionJalaliDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۲۶" autocomplete="off" data-jalali-date>
+                  </label>
+                </div>
+              </div>
             </div>
+            <p id="highAttentionDayHint" class="stream-filter-hint" hidden></p>
             <div class="bulletin-drafts-toolbar hidden" id="highAttentionDraftsToolbar">
               <label class="select-all-label"><input id="selectAllHighAttentionDrafts" type="checkbox"> انتخاب همه خبرهای این روز</label>
               <span id="highAttentionDraftsSelectionHint">خبرهای نهایی همین روز</span>
@@ -687,7 +692,7 @@
             </div>
           </article>
           <article class="panel">
-            <div class="panel-heading"><div><h3>تولیدهای پربازتاب این روز</h3><p>نسخه‌های پیش‌نویس و نهایی‌شدهٔ همان روز</p></div></div>
+            <div class="panel-heading"><h3>تولیدهای پربازتاب این روز</h3></div>
             <div id="highAttentionRuns" class="draft-list"><div class="empty-mini">روز را انتخاب کنید.</div></div>
           </article>
         </section>
@@ -912,7 +917,7 @@
     <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin/assets/wordcloud-layout.js?v=12.0.2" defer></script>
-  <script src="/admin/assets/app.js?v=12.0.2" defer></script>
+  <script src="/admin/assets/wordcloud-layout.js?v=12.0.3" defer></script>
+  <script src="/admin/assets/app.js?v=12.0.3" defer></script>
 </body>
 </html>
