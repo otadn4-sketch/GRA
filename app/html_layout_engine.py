@@ -23,14 +23,16 @@ from typing import Any
 
 from pypdf import PdfReader
 
-from .bulletin_models import BulletinData, BulletinPerson, BulletinStatement
+from .bulletin_models import BulletinData, BulletinPerson, BulletinStatement, CATEGORY_ORDER, is_event_category
 from .bulletin_validation import is_generic_url, valid_public_url
+from .calendar_dates import report_calendar_labels
 from .config import Settings
 from .persian_text import to_persian_digits
 from .weekday_palette import weekday_palette_for_report
+from .weekday_art import weekday_cover_svg
 
 
-_LAYOUT_VERSION = "garaye-minimal-a3-v7-weekday-palette"
+_LAYOUT_VERSION = "garaye-minimal-a3-v10-weekday-art-events-last"
 _A3_WIDTH_PT = 841.89
 _A3_HEIGHT_PT = 1190.55
 
@@ -140,7 +142,30 @@ def _category_color(value: str) -> str:
     return "#5C5A92"
 
 
+def _topic_share_rows(data: BulletinData) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for category, people in _public_categories(data):
+        for _person, statements in people:
+            for statement in statements:
+                topic = str(statement.topic or "موضوع نامشخص").strip() or "موضوع نامشخص"
+                counts[topic] = counts.get(topic, 0) + 1
+    total = sum(counts.values()) or 1
+    rows = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return [
+        {
+            "topic": topic,
+            "count": count,
+            "share": count / total,
+            "percent": round(100 * count / total),
+            "color": _category_color(topic),
+        }
+        for topic, count in rows
+    ]
+
+
 def _public_categories(data: BulletinData):
+    order_index = {key: index for index, (key, _title) in enumerate(CATEGORY_ORDER)}
+    grouped: list[tuple[Any, list[tuple[BulletinPerson, list[BulletinStatement]]]]] = []
     for category in data.categories:
         people: list[tuple[BulletinPerson, list[BulletinStatement]]] = []
         for person in category.people:
@@ -148,7 +173,17 @@ def _public_categories(data: BulletinData):
             if statements:
                 people.append((person, statements))
         if people:
-            yield category, people
+            grouped.append((category, people))
+    grouped.sort(
+        key=lambda item: (
+            1 if is_event_category(item[0].category_id) or str(item[0].category_id) == "events" else 0,
+            0 if not str(item[0].category_id).startswith("custom:") else 1,
+            order_index.get(item[0].category_id, 10**9),
+            int(item[0].order or 0),
+            item[0].title,
+        )
+    )
+    yield from grouped
 
 
 def _statement_card(
@@ -158,43 +193,52 @@ def _statement_card(
     sequence_index: int,
     section_key: str,
     section_title: str,
+    footnote_number: int | None = None,
 ) -> str:
     portrait = _data_uri(person.portrait_path) or _placeholder_portrait(person.name_canonical)
     qr = _editorial_qr_data_uri(statement)
-    # The page title retains the established registry grouping, while each
-    # news unit communicates only the published editorial fields.  This is
-    # intentionally quieter than a dashboard card: colour is reserved for a
-    # small topic tag and a hairline on the leading edge.
     general_topic = statement.topic or "موضوع نامشخص"
     main_subject = statement.main_subject or statement.headline or general_topic
-    color = _category_color(general_topic)
     one_line = statement.summary_lead or statement.summary_short or statement.headline
     paragraph = statement.summary_body or statement.summary_detailed or statement.summary_short
     location = statement.editorial_context_label or statement.statement_mode or "محل بیان نامشخص"
-    headline = statement.headline or one_line
     qr_html = (
         f'<img class="card-qr" src="{qr}" alt="کد QR منبع خبر">'
         if qr
-        else ''
+        else ""
     )
+    footnote_html = ""
+    if footnote_number and str(statement.footnote or "").strip():
+        footnote_html = (
+            f'<sup class="fn-ref" data-footnote="{_esc(statement.footnote)}">'
+            f"{to_persian_digits(footnote_number)}</sup>"
+        )
+    is_event = is_event_category(section_key) or str(section_key) == "events"
+    if is_event:
+        return f"""
+<article class="news-card event-card" data-statement-id="{_esc(statement.statement_id)}" data-layout-sequence="{sequence_index + 1}" data-category-id="{_esc(section_key)}" data-category-title="{_esc(section_title)}" data-footnote="{_esc(statement.footnote or '')}">
+  <div class="message">
+    <div class="message-body">
+      <p>{_display(paragraph)}{footnote_html}</p>
+      {qr_html}
+    </div>
+  </div>
+</article>"""
     position = person.position or "سمت نامشخص"
     identity_html = f"""
   <div class="identity-row">
     <div class="identity-box"><strong>{_display(person.name_canonical)}</strong><span>{_display(position)}</span></div>
     <img class="portrait" src="{portrait}" alt="تصویر {_display(person.name_canonical)}">
   </div>"""
-    # Identity (photo/name/position) must sit above topic and the directional
-    # main-subject phrase so every HTML/PDF card opens with the speaker block.
     return f"""
-<article class="news-card" data-statement-id="{_esc(statement.statement_id)}" data-layout-sequence="{sequence_index + 1}" data-category-id="{_esc(section_key)}" data-category-title="{_esc(section_title)}" style="--category-color:{color}">
+<article class="news-card" data-statement-id="{_esc(statement.statement_id)}" data-layout-sequence="{sequence_index + 1}" data-category-id="{_esc(section_key)}" data-category-title="{_esc(section_title)}" data-footnote="{_esc(statement.footnote or '')}">
   {identity_html}
-  <span class="category-label">{_display(general_topic)}</span>
   <h2 class="news-headline">{_display(main_subject)}</h2>
   <div class="message">
     <p class="one-line"><strong>{_display(one_line)}</strong></p>
     <p class="statement-location">{_display(location)}</p>
     <div class="message-body">
-      <p>{_display(paragraph)}</p>
+      <p>{_display(paragraph)}{footnote_html}</p>
       {qr_html}
     </div>
   </div>
@@ -202,13 +246,18 @@ def _statement_card(
 
 
 def _cover_sheet(data: BulletinData) -> str:
+    dates = report_calendar_labels(data.meta.report_date_jalali)
+    palette = weekday_palette_for_report(data.meta.report_date_jalali)
+    art = weekday_cover_svg(palette)
     return f"""
 <section class="sheet cover-sheet" data-page-kind="cover" aria-label="جلد">
-  <div class="cover-grid-mark" aria-hidden="true"></div>
   <div class="cover-kicker">بولتن تحلیلی گرایه</div>
   <div class="cover-title">خبرنامه<br>گرایه</div>
   <div class="cover-copy">رصد، تحلیل و صورت‌بندی هوشمند جریان خبر</div>
-  <div class="cover-meta"><span>شماره {_display(data.meta.issue_number)}</span><i></i><span>{_display(data.meta.report_date_jalali)}</span></div>
+  <div class="cover-meta"><span>شماره {_display(data.meta.issue_number)}</span><i></i><span>{_display(dates['jalali_label'])}</span></div>
+  <div class="cover-dates"><span>قمری {_display(dates['hijri_label'])}</span><span>میلادی {_display(dates['gregorian_label'])}</span></div>
+  <div class="cover-day-art" aria-hidden="true">{art}</div>
+  <div class="cover-weekday-chip">{_display(palette.get('name'))} · {_display(palette.get('label'))}</div>
 </section>"""
 
 
@@ -248,7 +297,7 @@ def _toc_sheet(
         else ""
     )
     controversy_row = (
-        '<li data-toc-ref="high-attention"><span>پربازتاب</span><i class="toc-tab-leader"></i><b class="toc-page"></b></li>'
+        '<li data-toc-ref="high-attention"><span>پربازتاب‌ها</span><i class="toc-tab-leader"></i><b class="toc-page"></b></li>'
         if data.controversies
         else ""
     )
@@ -296,13 +345,37 @@ def _high_attention_sheet(data: BulletinData) -> str:
         f"""<article class="attention-item"><h2>{_display(index)}. {_display(item.title)}</h2><p>{_display(item.summary)}</p></article>"""
         for index, item in enumerate(data.controversies, 1)
     )
-    body = f'<div class="feature-heading"><span>اخبار پربازتاب</span></div><div class="attention-list">{cards}</div>'
+    body = f'<div class="feature-heading"><span>پربازتاب‌ها</span></div><div class="attention-list">{cards}</div>'
     return _fixed_sheet(
         data,
         kind="high-attention",
         body=body,
         toc_key="high-attention",
         classes="attention-sheet",
+    )
+
+
+def _topic_chart_sheet(data: BulletinData, rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    segments = "".join(
+        f'<i style="width:{max(2, item["percent"])}%;background:{item["color"]}" title="{_esc(item["topic"])}"></i>'
+        for item in rows
+    )
+    legend = "".join(
+        f'<li><span style="background:{item["color"]}"></span><b>{_display(item["topic"])}</b><small>{_display(item["percent"])}٪ · {_display(item["count"])} خبر</small></li>'
+        for item in rows
+    )
+    body = f"""
+<div class="feature-heading"><span>سهم موضوعات</span></div>
+<div class="topic-share-bar" role="img" aria-label="نمودار سهمی افقی موضوعات">{segments}</div>
+<ul class="topic-share-legend">{legend}</ul>
+"""
+    return _fixed_sheet(
+        data,
+        kind="topic-share",
+        body=body,
+        classes="topic-chart-sheet",
     )
 
 
@@ -325,34 +398,52 @@ body{{margin:0;color:var(--ink);background:{paper};font-family:"IRZarEmbedded",I
 html,body,body *{{direction:rtl;unicode-bidi:plaintext}}
 #publication{{display:flex;flex-direction:column;align-items:center;gap:12mm;padding:12mm 0}}
 .sheet{{position:relative;width:297mm;height:420mm;background:var(--paper);overflow:hidden;flex:none;box-shadow:0 4mm 13mm rgba(32,37,43,.17)}}
+.sheet:not(.cover-sheet)::before{{content:"";position:absolute;top:0;bottom:0;right:0;width:3.2mm;background:var(--identity);z-index:4}}
 .page-frame{{position:absolute;inset:21mm 20mm 22mm;overflow:hidden}}
 .page-footer{{position:absolute;right:20mm;left:20mm;bottom:8mm;height:7mm;display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;border-top:.45pt solid var(--fine-line);color:var(--muted);font-size:8.8pt;letter-spacing:.02em}}
 .page-footer span:last-child{{text-align:left}}.page-footer b{{text-align:center;color:var(--ink);font-size:10.5pt}}
 .cover-sheet{{background:var(--identity-dark);color:#fff;padding:34mm 28mm;display:flex;flex-direction:column;justify-content:center;isolation:isolate}}
 .cover-sheet::before{{content:"";position:absolute;inset:0;background:radial-gradient(circle at 78% 14%,color-mix(in srgb,var(--identity) 45%,transparent),transparent 26%),linear-gradient(125deg,color-mix(in srgb,var(--identity) 22%,transparent),transparent 48%);z-index:-1}}
-.cover-grid-mark{{position:absolute;left:23mm;bottom:27mm;width:74mm;height:74mm;border:1px solid color-mix(in srgb,var(--identity-light) 80%,#fff);border-radius:50%;background:repeating-linear-gradient(90deg,transparent 0 10mm,color-mix(in srgb,var(--identity-light) 55%,transparent) 10.4mm 10.8mm),repeating-linear-gradient(0deg,transparent 0 10mm,color-mix(in srgb,var(--identity-light) 40%,transparent) 10.4mm 10.8mm);transform:rotate(19deg)}}
+.cover-grid-mark{{display:none}}
+.cover-day-art{{position:absolute;left:18mm;bottom:22mm;width:118mm;height:118mm}}
+.cover-day-art svg{{width:100%;height:100%;display:block}}
+.cover-weekday-chip{{position:absolute;right:28mm;bottom:28mm;padding:3mm 6mm;border:1px solid color-mix(in srgb,var(--identity-light) 70%,#fff);border-radius:999px;color:var(--identity-light);font-size:12pt;font-weight:700}}
+.category-title-sheet{{background:var(--paper);display:flex;align-items:center;justify-content:center}}
+.category-title-frame{{position:absolute;inset:36mm 24mm 28mm;display:flex;align-items:center;justify-content:center;border:.7pt solid var(--identity);color:var(--identity-dark);font-size:42pt;font-weight:900;text-align:center;line-height:1.35;padding:12mm}}
 .cover-kicker{{color:var(--identity-light);font-size:12pt;font-weight:700;letter-spacing:.08em}}.cover-title{{margin-top:11mm;font-size:54pt;line-height:1.25;font-weight:900;letter-spacing:-.02em}}.cover-copy{{margin-top:8mm;color:#f7f1ef;font-size:15pt}}.cover-meta{{display:flex;align-items:center;gap:7mm;margin-top:22mm;color:#f3e6e2;font-size:13pt}}.cover-meta i{{display:block;width:1px;height:7mm;background:var(--identity)}}
+.cover-dates{{display:flex;flex-wrap:wrap;gap:8mm;margin-top:8mm;color:var(--identity-light);font-size:12pt}}
 .feature-heading{{position:relative;margin:0 0 11mm;padding:0 0 5mm;border-bottom:.55pt solid var(--fine-line);text-align:center}}
 .feature-heading::after{{content:"";position:absolute;right:50%;bottom:-2.5mm;width:5mm;height:5mm;background:var(--identity);transform:translateX(50%) rotate(45deg)}}
-.feature-heading span{{color:var(--ink);font-size:28pt;font-weight:900;line-height:1}}
-.toc-heading{{margin:0 0 10mm;padding:0 0 5mm;border-bottom:.55pt solid var(--fine-line);font-size:28pt;font-weight:900;text-align:center}}
+.feature-heading span{{color:var(--identity-dark);font-size:28pt;font-weight:900;line-height:1}}
+.toc-heading{{margin:0 0 10mm;padding:0 0 5mm;border-bottom:.55pt solid var(--identity);color:var(--identity-dark);font-size:28pt;font-weight:900;text-align:center}}
 .toc-list{{list-style:none;margin:0;padding:0;font-size:14pt}}.toc-list>li{{display:grid;grid-template-columns:auto 1fr 14mm;align-items:end;gap:3mm;padding:2.8mm 0;border-bottom:.35pt solid rgba(32,37,43,.2)}}
 .toc-list .toc-tab-leader{{border-bottom:1px dotted var(--muted);transform:translateY(-2mm)}}.toc-list b{{text-align:left;color:var(--ink);direction:ltr;unicode-bidi:isolate}}
 .toc-list .toc-group{{margin-top:2mm;font-weight:800}}.toc-list .toc-group ol{{grid-column:1/4;list-style:none;margin:2mm 7mm 0 0;padding:0;font-weight:400;font-size:12.2pt}}.toc-list .toc-group ol li{{margin:1.3mm 0}}
 .intro-copy{{font-size:16pt;line-height:2;text-align:justify}}.intro-copy p{{margin:0 0 7mm}}.attention-list{{display:block}}.attention-item{{padding:0 0 6mm;margin:0 0 6mm;border-bottom:.45pt solid var(--fine-line)}}.attention-item h2{{font-size:17pt;margin:0 0 2mm}}.attention-item p{{font-size:13.5pt;text-align:justify;line-height:1.85;margin:0}}
-.section-heading{{position:absolute;top:23mm;right:20mm;left:20mm;height:21mm;display:flex;justify-content:center;align-items:center;border-bottom:.55pt solid var(--fine-line);font-size:27pt;font-weight:900;z-index:3;white-space:nowrap}}
+.section-heading{{position:absolute;top:23mm;right:20mm;left:20mm;height:21mm;display:flex;justify-content:center;align-items:center;border-bottom:.55pt solid var(--identity);color:var(--identity-dark);font-size:27pt;font-weight:900;z-index:3;white-space:nowrap}}
 .section-heading::after{{content:"";position:absolute;right:50%;bottom:-2.8mm;width:5mm;height:5mm;background:var(--identity);transform:translateX(50%) rotate(45deg)}}.section-rule{{display:none}}
-.content-frame{{position:absolute;top:57mm;right:20mm;left:20mm;bottom:22mm;display:grid;grid-template-columns:1fr 1fr;gap:12mm;direction:rtl;overflow:hidden}}
-.content-frame::after{{content:"";position:absolute;top:0;bottom:0;right:50%;border-right:.35pt solid rgba(32,37,43,.35);pointer-events:none}}.content-column{{height:100%;overflow:visible;display:flex;flex-direction:column;gap:5mm;min-width:0}}
-.content-sheet.wide .content-frame{{grid-template-columns:1fr}}.content-sheet.wide .content-frame::after{{display:none}}.content-sheet.wide .content-column:nth-child(2){{display:none}}
-.news-card{{position:relative;direction:rtl;background:transparent;flex:none;break-inside:avoid;border-inline-start:3.2px solid var(--category-color);padding-inline-start:4mm;padding-block:0 3.3mm}}
-.category-label{{display:inline-flex;align-items:center;min-height:5.6mm;padding:0 2.2mm;background:var(--category-color);color:#fff;font-size:9.4pt;font-weight:800;line-height:1.12;white-space:nowrap}}
-.news-headline{{margin:2.6mm 0 2.8mm;color:var(--ink);font-size:16.5pt;line-height:1.45;font-weight:900}}
+.content-frame{{position:absolute;top:57mm;right:20mm;left:20mm;bottom:28mm;display:grid;grid-template-columns:1fr 1fr;gap:12mm;direction:rtl;overflow:hidden}}
+.content-frame::after{{display:none!important}}
+.content-column{{height:100%;overflow:visible;display:flex;flex-direction:column;gap:5mm;min-width:0}}
+.content-sheet.wide .content-frame{{grid-template-columns:1fr}}.content-sheet.wide .content-column:nth-child(2){{display:none}}
+.news-card{{position:relative;direction:rtl;background:transparent;flex:none;break-inside:avoid;border-right:3.2px solid var(--identity);padding-right:4mm;padding-left:0;padding-block:0 3.3mm}}
+.news-card.event-card{{padding-right:4mm}}
+.category-label{{display:none}}
+.news-headline{{margin:2.6mm 0 2.8mm;color:var(--identity-dark);font-size:16.5pt;line-height:1.45;font-weight:900}}
 .identity-row{{display:flex;align-items:center;gap:2.5mm;min-height:17mm;margin:0 0 2.8mm}}.portrait{{order:-1;width:17mm;height:17mm;object-fit:cover;border-radius:50%;border:.4pt solid rgba(32,37,43,.45);filter:grayscale(1);display:block;background:var(--identity-light)}}.identity-box{{display:flex;flex-direction:column;justify-content:center;gap:.35mm;min-height:17mm}}.identity-box strong{{font-size:11.8pt;font-weight:900}}.identity-box span{{color:var(--muted);font-size:10.1pt;line-height:1.35}}
-.news-card>.category-label{{margin-top:0}}.news-card>.news-headline{{margin-top:2.2mm}}
-.message{{position:relative;padding:0 0 2.8mm;border-bottom:.45pt solid var(--fine-line)}}.message p{{margin:0;text-align:justify}}.one-line,.one-line strong{{font-family:"IRZarBoldEmbedded","IRZAR-BOLD","IRZarEmbedded",IRZar,"B Zar",Tahoma,Arial,sans-serif;font-weight:700;font-size:11.9pt;line-height:1.55}}.statement-location{{display:inline-block;margin:2.2mm 0!important;border-bottom:.65pt solid var(--ink);font-size:10.3pt;font-weight:700;line-height:1.45}}.message-body{{display:flex;flex-direction:column;gap:1.4mm;align-items:stretch}}.message-body p{{font-size:10.6pt;line-height:1.72}}.card-qr{{width:12mm;height:12mm;object-fit:contain;align-self:flex-end;margin-top:.5mm;image-rendering:auto}}.card-qr-empty{{display:none}}
-.news-card.compact{{padding-inline-start:3.5mm;padding-block-end:2.5mm}}.news-card.compact .category-label{{min-height:5mm;font-size:8.9pt}}.news-card.compact .news-headline{{font-size:15.2pt;margin:2mm 0 2.2mm;line-height:1.34}}.news-card.compact .portrait{{width:15mm;height:15mm}}.news-card.compact .identity-row{{min-height:15mm;margin-bottom:2mm}}.news-card.compact .identity-box{{min-height:15mm}}.news-card.compact .identity-box strong{{font-size:10.9pt}}.news-card.compact .identity-box span{{font-size:9.5pt}}.news-card.compact .one-line{{font-size:10.9pt;line-height:1.45}}.news-card.compact .statement-location{{margin:1.8mm 0!important;font-size:9.6pt}}.news-card.compact .message{{padding-bottom:2.2mm}}.news-card.compact .message-body p{{font-size:9.9pt;line-height:1.58}}.news-card.compact .card-qr{{width:10.5mm;height:10.5mm}}
-.news-card.dense{{padding-inline-start:3mm;padding-block-end:2mm}}.news-card.dense .category-label{{min-height:4.6mm;font-size:8.4pt}}.news-card.dense .news-headline{{font-size:14.2pt;margin:1.7mm 0;line-height:1.25}}.news-card.dense .portrait{{width:13.5mm;height:13.5mm}}.news-card.dense .identity-row{{min-height:13.5mm;margin-bottom:1.6mm}}.news-card.dense .identity-box{{min-height:13.5mm}}.news-card.dense .identity-box strong{{font-size:10.1pt}}.news-card.dense .identity-box span{{font-size:8.9pt}}.news-card.dense .one-line{{font-size:10.1pt;line-height:1.35}}.news-card.dense .statement-location{{margin:1.4mm 0!important;font-size:9pt}}.news-card.dense .message{{padding-bottom:1.8mm}}.news-card.dense .message-body p{{font-size:9.1pt;line-height:1.46}}.news-card.dense .card-qr{{width:9.5mm;height:9.5mm}}
+.news-card>.news-headline{{margin-top:2.2mm}}
+.fn-ref{{display:inline;margin-right:.8mm;color:var(--identity-dark);font-size:8pt;font-weight:800;vertical-align:super;line-height:0}}
+.page-footnotes{{position:absolute;right:20mm;left:20mm;bottom:16mm;max-height:12mm;overflow:hidden;border-top:.4pt solid var(--identity);padding-top:1.6mm;color:var(--muted);font-size:8.4pt;line-height:1.45}}
+.page-footnotes b{{color:var(--identity-dark)}}
+.topic-share-bar{{display:flex;flex-direction:row-reverse;height:14mm;overflow:hidden;border-radius:2mm;background:var(--identity-light)}}
+.topic-share-bar i{{display:block;height:100%;min-width:2mm}}
+.topic-share-legend{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4mm 8mm;margin:10mm 0 0;padding:0;list-style:none}}
+.topic-share-legend li{{display:grid;grid-template-columns:6mm 1fr auto;gap:3mm;align-items:center}}
+.topic-share-legend span{{display:block;width:6mm;height:6mm;border-radius:1mm}}
+.topic-share-legend small{{color:var(--muted)}}
+.message{{position:relative;padding:0 0 2.8mm;border-bottom:.45pt solid var(--fine-line)}}.message p{{margin:0;text-align:justify}}.one-line,.one-line strong{{font-family:"IRZarBoldEmbedded","IRZAR-BOLD","IRZarEmbedded",IRZar,"B Zar",Tahoma,Arial,sans-serif;font-weight:700;font-size:11.9pt;line-height:1.55}}.statement-location{{display:inline-block;margin:2.2mm 0!important;border-bottom:.65pt solid var(--identity-dark);font-size:10.3pt;font-weight:700;line-height:1.45}}.message-body{{display:flex;flex-direction:column;gap:1.4mm;align-items:stretch}}.message-body p{{font-size:10.6pt;line-height:1.72}}.card-qr{{width:12mm;height:12mm;object-fit:contain;align-self:flex-end;margin-top:.5mm;image-rendering:auto}}.card-qr-empty{{display:none}}
+.news-card.compact{{padding-right:3.5mm;padding-block-end:2.5mm}}.news-card.compact .news-headline{{font-size:15.2pt;margin:2mm 0 2.2mm;line-height:1.34}}.news-card.compact .portrait{{width:15mm;height:15mm}}.news-card.compact .identity-row{{min-height:15mm;margin-bottom:2mm}}.news-card.compact .identity-box{{min-height:15mm}}.news-card.compact .identity-box strong{{font-size:10.9pt}}.news-card.compact .identity-box span{{font-size:9.5pt}}.news-card.compact .one-line{{font-size:10.9pt;line-height:1.45}}.news-card.compact .statement-location{{margin:1.8mm 0!important;font-size:9.6pt}}.news-card.compact .message{{padding-bottom:2.2mm}}.news-card.compact .message-body p{{font-size:9.9pt;line-height:1.58}}.news-card.compact .card-qr{{width:10.5mm;height:10.5mm}}
+.news-card.dense{{padding-right:3mm;padding-block-end:2mm}}.news-card.dense .news-headline{{font-size:14.2pt;margin:1.7mm 0;line-height:1.25}}.news-card.dense .portrait{{width:13.5mm;height:13.5mm}}.news-card.dense .identity-row{{min-height:13.5mm;margin-bottom:1.6mm}}.news-card.dense .identity-box{{min-height:13.5mm}}.news-card.dense .identity-box strong{{font-size:10.1pt}}.news-card.dense .identity-box span{{font-size:8.9pt}}.news-card.dense .one-line{{font-size:10.1pt;line-height:1.35}}.news-card.dense .statement-location{{margin:1.4mm 0!important;font-size:9pt}}.news-card.dense .message{{padding-bottom:1.8mm}}.news-card.dense .message-body p{{font-size:9.1pt;line-height:1.46}}.news-card.dense .card-qr{{width:9.5mm;height:9.5mm}}
 .layout-source{{display:none!important}}
 .layout-error{{outline:2mm solid #c60000!important}}
 @media print{{html,body{{background:#fff}}#publication{{display:block;padding:0}}.sheet{{box-shadow:none;break-after:page;page-break-after:always;margin:0}}.sheet:last-child{{break-after:auto;page-break-after:auto}}}}
@@ -369,6 +460,16 @@ def _pagination_script() -> str:
   const toPersianDigits = (value) => String(value).replace(/[0-9٠-٩]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹۰۱۲۳۴۵۶۷۸۹"["0123456789٠١٢٣٤٥٦٧٨٩".indexOf(digit)] || digit);
   const safeHtml = (value) => String(value || "").replace(/[&<>\"']/g, (character) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[character]);
 
+  function categoryTitlePage(categoryId, categoryTitle) {
+    const page = document.createElement("section");
+    page.className = "sheet category-title-sheet";
+    page.dataset.pageKind = "category-title";
+    page.dataset.categoryId = categoryId;
+    page.dataset.tocKey = "category-" + categoryId;
+    page.innerHTML = '<div class="category-title-frame"><span>' + safeHtml(categoryTitle) + '</span></div>' + footerTemplate;
+    publication.appendChild(page);
+    return page;
+  }
   function contentPage(categoryId, categoryTitle, wide=false) {
     const page = document.createElement("section");
     page.className = "sheet content-sheet" + (wide ? " wide" : "");
@@ -378,12 +479,25 @@ def _pagination_script() -> str:
       '<div class="section-heading">' + safeHtml(categoryTitle) + '</div>' +
       '<div class="section-rule"></div>' +
       '<div class="content-frame"><div class="content-column"></div><div class="content-column"></div></div>' +
+      '<aside class="page-footnotes"></aside>' +
       footerTemplate;
     publication.appendChild(page);
     return page;
   }
   function overflows(column) {
     return column.scrollHeight > column.clientHeight + 2;
+  }
+  function attachFootnote(page, card) {
+    const text = String(card.dataset.footnote || "").trim();
+    if (!text || !page) return;
+    const box = page.querySelector(".page-footnotes");
+    if (!box) return;
+    const index = box.querySelectorAll("div").length + 1;
+    const ref = card.querySelector(".fn-ref");
+    if (ref) ref.textContent = toPersianDigits(index);
+    const row = document.createElement("div");
+    row.innerHTML = "<b>" + toPersianDigits(index) + ".</b> " + safeHtml(text);
+    box.appendChild(row);
   }
   function tryPlace(column, card, density) {
     card.classList.remove("compact", "dense", "layout-error");
@@ -402,28 +516,39 @@ def _pagination_script() -> str:
   }
   function placeCard(card, categoryId, categoryTitle, state) {
     let column = columnFor(state);
-    if (tryPlace(column, card, "") || tryPlace(column, card, "compact")) return;
+    if (tryPlace(column, card, "") || tryPlace(column, card, "compact")) {
+      attachFootnote(state.page, card);
+      return;
+    }
 
     if (state.column === 0) {
       state.column = 1;
       column = columnFor(state);
-      if (tryPlace(column, card, "") || tryPlace(column, card, "compact")) return;
+      if (tryPlace(column, card, "") || tryPlace(column, card, "compact")) {
+        attachFootnote(state.page, card);
+        return;
+      }
     }
 
     startPage(state, categoryId, categoryTitle);
     column = columnFor(state);
-    if (tryPlace(column, card, "") || tryPlace(column, card, "compact")) return;
+    if (tryPlace(column, card, "") || tryPlace(column, card, "compact")) {
+      attachFootnote(state.page, card);
+      return;
+    }
 
     // A very long, yet still atomic, news card gets a single wide page before
     // being marked as an overflow. Ordinary cards never reserve a fixed height.
     startPage(state, categoryId, categoryTitle, true);
     column = columnFor(state);
     if (tryPlace(column, card, "dense")) {
+      attachFootnote(state.page, card);
       startPage(state, categoryId, categoryTitle);
       return;
     }
     card.classList.add("dense", "layout-error");
     column.appendChild(card);
+    attachFootnote(state.page, card);
     audit.overflowCards.push(card.dataset.statementId || "unknown");
     startPage(state, categoryId, categoryTitle);
   }
@@ -443,10 +568,12 @@ def _pagination_script() -> str:
         const categoryId = card.dataset.categoryId || "other";
         const categoryTitle = card.dataset.categoryTitle || "سایر اخبار";
         if (!state) {
+          categoryTitlePage(categoryId, categoryTitle);
           state = {page:contentPage(categoryId, categoryTitle), column:0};
         } else if (state.page.dataset.categoryId !== categoryId) {
-          // Each registry/event section must start on its own page so no card
-          // is dropped under the previous section heading.
+          // Each registry/event section starts with an independent title page
+          // so the category name is never mixed with the previous news block.
+          categoryTitlePage(categoryId, categoryTitle);
           startPage(state, categoryId, categoryTitle);
         }
         if (!seenTocCategories.has(categoryId)) {
@@ -459,7 +586,11 @@ def _pagination_script() -> str:
       for (const page of publication.querySelectorAll(".content-sheet")) {
         const columns = page.querySelectorAll(".content-column");
         if ([...columns].every(col => col.children.length === 0)) page.remove();
+        const notes = page.querySelector(".page-footnotes");
+        if (notes && !notes.children.length) notes.remove();
       }
+      const topicChart = source.querySelector(".layout-topic-chart .sheet");
+      if (topicChart) publication.appendChild(topicChart.cloneNode(true));
       const sheets = [...publication.querySelectorAll(".sheet")];
       sheets.forEach((sheet, index) => {
         sheet.dataset.pageNumber = String(index + 1);
@@ -512,16 +643,23 @@ def _ordered_public_cards(
                 flattened.append(entry)
                 by_statement_id[statement.statement_id] = entry
 
+    order_index = {statement_id: index for index, statement_id in enumerate(data.publication_order)}
     ordered: list[tuple[Any, BulletinPerson, BulletinStatement]] = []
     used: set[str] = set()
-    for statement_id in data.publication_order:
-        entry = by_statement_id.get(statement_id)
-        if entry is not None:
+    for category, people in _public_categories(data):
+        entries: list[tuple[Any, BulletinPerson, BulletinStatement]] = []
+        for person, statements in people:
+            for statement in statements:
+                entries.append((category, person, statement))
+        entries.sort(
+            key=lambda item: (
+                order_index.get(item[2].statement_id, 10**9),
+                int(item[2].editorial_order or 0) or 10**9,
+            )
+        )
+        for entry in entries:
             ordered.append(entry)
-            used.add(statement_id)
-    # Older runs do not have publication_order.  Their canonical JSON order is
-    # retained as a backwards-compatible fallback, and omitted IDs are never
-    # silently discarded.
+            used.add(entry[2].statement_id)
     ordered.extend(entry for entry in flattened if entry[2].statement_id not in used)
     return ordered, by_statement_id
 
@@ -568,9 +706,12 @@ def render_html(data: BulletinData, project_root: Path) -> tuple[str, dict[str, 
             sequence_index=sequence_index,
             section_key=category.category_id,
             section_title=category.title,
+            footnote_number=(sequence_index + 1) if str(statement.footnote or "").strip() else None,
         )
         for sequence_index, (category, person, statement) in enumerate(ordered_cards)
     )
+    topic_rows = _topic_share_rows(data)
+    topic_chart = _topic_chart_sheet(data, topic_rows)
 
     title = f"خبرنامه گرایه، شماره {to_persian_digits(data.meta.issue_number)}"
     document = f"""<!doctype html>
@@ -585,7 +726,10 @@ def render_html(data: BulletinData, project_root: Path) -> tuple[str, dict[str, 
 <body dir="rtl">
   <main id="publication">{"".join(numbered_fixed)}</main>
   <template id="footer-template">{_footer(data)}</template>
-  <aside id="layout-source" class="layout-source" aria-hidden="true"><div class="layout-card-stream">{source_cards}</div></aside>
+  <aside id="layout-source" class="layout-source" aria-hidden="true">
+    <div class="layout-card-stream">{source_cards}</div>
+    <div class="layout-topic-chart">{topic_chart}</div>
+  </aside>
   <script>{_pagination_script()}</script>
 </body>
 </html>"""

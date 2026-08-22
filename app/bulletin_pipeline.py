@@ -14,7 +14,8 @@ import httpx
 from .ai_key_pool import AIKeyPool, NoAvailableAPIKey
 from .config import Settings
 from .db import Database, dumps
-from .persian_text import canonical_key, keywords, normalize_persian, split_sentences
+from .near_duplicate import keyword_jaccard
+from .persian_text import canonical_key, normalize_persian, split_sentences
 
 
 PIPELINE_VERSION = "11.0"
@@ -88,10 +89,7 @@ def _extract_output_text(payload: dict[str, Any]) -> str:
 
 
 def _jaccard(a: str, b: str) -> float:
-    left, right = keywords(a), keywords(b)
-    if not left or not right:
-        return 0.0
-    return len(left & right) / len(left | right)
+    return keyword_jaccard(a, b)
 
 
 def _trim_words(value: str, limit: int) -> str:

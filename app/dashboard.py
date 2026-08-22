@@ -15,7 +15,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
@@ -27,9 +27,20 @@ import qrcode
 from .auth import ROLE_PERMISSIONS, ROLE_TITLES, AdminPrincipal, VALID_ROLES
 from .bulletins import BulletinService
 from .backup import create_backup
+from .bale import BaleAPIError, BaleClient
 from .bulletin_cleanup import bulletin_run_directory, remove_bulletin_run_directory
 from .config import Settings
-from .db import Database, EditorialDraftConflictError, comparable_utc_iso
+from .db import (
+    BALE_MEDIA_MAX_BYTES,
+    Database,
+    EditorialDraftConflictError,
+    comparable_utc_iso,
+    eitan_axis_public,
+    message_media_assets,
+    resolve_media_mime,
+)
+from .eitan_library import parse_eitan_library_upload
+from .gapgpt_status import fetch_gapgpt_status
 from .live_update import apply_update_zip, current_version, last_update_status, request_reload
 from .scheduler import BulletinScheduler
 from .editorial_automation import EditorialAutomationService
@@ -131,6 +142,10 @@ class PersonCategoryCreate(BaseModel):
     title: str
 
 
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
 class TopicCreate(BaseModel):
     topic_id: int | None = None
     name: str
@@ -216,6 +231,7 @@ class EditorialDraftSave(BaseModel):
     main_subject: str | None = Field(default=None, max_length=300)
     oration_location: str | None = None
     source_url: str | None = None
+    footnote: str | None = Field(default=None, max_length=4000)
     change_reason: str = "ویرایش سردبیر"
 
 
@@ -306,11 +322,80 @@ class AutomationStageStart(BaseModel):
 
 
 _DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+_PM_MARKERS = ("pm", "p.m", "p.m.", "ب.ظ", "ب ظ", "بعدازظهر", "بعد از ظهر")
+_AM_MARKERS = ("am", "a.m", "a.m.", "ق.ظ", "ق ظ", "قبل‌ازظهر", "قبل از ظهر")
+
+
+def _normalize_clock_24h(value: str | None) -> str | None:
+    """Accept 24h or 12h (AM/PM / قبل‌ازظهر) clocks and return HH:MM."""
+
+    raw = str(value or "").translate(_DIGIT_TRANSLATION).strip()
+    if not raw:
+        return None
+    lowered = raw.lower().replace("٫", ":")
+    is_pm = any(marker in lowered for marker in _PM_MARKERS)
+    is_am = any(marker in lowered for marker in _AM_MARKERS)
+    stripped = re.sub(
+        r"(a\.?m\.?|p\.?m\.?|ق\.?\s*ظ\.?|ب\.?\s*ظ\.?|قبل‌?ازظهر|بعدازظهر|قبل از ظهر|بعد از ظهر)",
+        "",
+        lowered,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(r"[.\-]", ":", stripped)
+    stripped = re.sub(r"\s+", "", stripped)
+    match = re.fullmatch(r"(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?", stripped)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    second = int(match.group(3) or 0)
+    if is_pm and hour < 12:
+        hour += 12
+    if is_am and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59 or second > 59:
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _split_jalali_datetime(value: str) -> tuple[str, str | None]:
+    clean = re.sub(r"\s+", " ", str(value or "").translate(_DIGIT_TRANSLATION).strip())
+    if not clean:
+        return "", None
+    match = re.match(r"^(\d{4}[/-]\d{1,2}[/-]\d{1,2})(?:[ T]+(.+))?$", clean)
+    if not match:
+        return clean, None
+    return match.group(1), match.group(2)
+
+
+def _jalali_window_utc(
+    date_jalali: str | None,
+    clock: str | None,
+    timezone_name: str,
+    *,
+    end_of_day: bool,
+) -> str | None:
+    if not date_jalali:
+        return None
+    date_part, embedded_clock = _split_jalali_datetime(date_jalali)
+    resolved_clock = _normalize_clock_24h(clock) or _normalize_clock_24h(embedded_clock)
+    stamp = f"{date_part} {resolved_clock}" if resolved_clock else date_part
+    return _jalali_local_to_utc_iso(
+        stamp,
+        timezone_name,
+        end_of_day=end_of_day if not resolved_clock else True if end_of_day else False,
+    )
 
 
 def _jalali_local_to_utc_iso(value: str, timezone_name: str, *, end_of_day: bool = False) -> str:
     clean = str(value or "").translate(_DIGIT_TRANSLATION).strip()
     clean = re.sub(r"\s+", " ", clean)
+    date_part, clock_part = _split_jalali_datetime(clean)
+    normalized_clock = _normalize_clock_24h(clock_part)
+    if clock_part and not normalized_clock:
+        raise ValueError("ساعت باید ۲۴ساعته و مانند ۱۳:۳۰ باشد.")
+    if normalized_clock:
+        clean = f"{date_part} {normalized_clock}"
     match = re.fullmatch(
         r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?",
         clean,
@@ -324,6 +409,8 @@ def _jalali_local_to_utc_iso(value: str, timezone_name: str, *, end_of_day: bool
         hour = int(match.group(4))
         minute = int(match.group(5))
         second = int(match.group(6) or 0)
+        if end_of_day and match.group(6) is None:
+            second = 59
     if hour > 23 or minute > 59 or second > 59:
         raise ValueError("ساعت واردشده نامعتبر است.")
     try:
@@ -351,11 +438,9 @@ def _finalization_time_to_utc_iso(payload: EditorialFinalize) -> str | None:
             end_of_day=False,
         )
     if payload.finalized_date_jalali:
-        time_value = str(payload.finalized_time or "").translate(_DIGIT_TRANSLATION).strip()
+        time_value = _normalize_clock_24h(payload.finalized_time)
         if not time_value:
             raise ValueError("برای تاریخ نهایی‌سازی، ساعت و دقیقه را نیز وارد کنید.")
-        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?", time_value):
-            raise ValueError("ساعت نهایی‌سازی باید مانند 13:30 باشد.")
         return _jalali_local_to_utc_iso(
             f"{payload.finalized_date_jalali} {time_value}",
             payload.timezone,
@@ -376,8 +461,8 @@ def _finalization_time_to_utc_iso(payload: EditorialFinalize) -> str | None:
 
 def _automation_start_to_utc_iso(payload: AutomationStageStart) -> str:
     """Validate the required Jalali date/time boundary for one stage."""
-    time_value = str(payload.start_time or "").translate(_DIGIT_TRANSLATION).strip()
-    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?", time_value):
+    time_value = _normalize_clock_24h(payload.start_time)
+    if not time_value:
         raise ValueError("ساعت شروع باید مانند ۱۳:۳۰ وارد شود.")
     return _jalali_local_to_utc_iso(
         f"{payload.start_date_jalali} {time_value}",
@@ -394,6 +479,7 @@ def create_dashboard_router(
     editorial_automation: EditorialAutomationService,
     get_target_chat_id: Callable[[], Any],
     bot_queue_recovery_runner: Callable[[int, int], Awaitable[None]] | None = None,
+    bale: BaleClient | None = None,
 ) -> APIRouter:
     router = APIRouter()
     bot_queue_recovery_task: asyncio.Task[None] | None = None
@@ -401,6 +487,8 @@ def create_dashboard_router(
     def required_permission(request: Request) -> str:
         path = request.url.path
         method = request.method.upper()
+        if path.startswith("/admin/api/api-keys"):
+            return "dashboard.view"
         if path.startswith("/admin/api/users/senders") or path == "/admin/api/users/roles":
             return "dashboard.view"
         if path.startswith("/admin/api/users/") and path.endswith("/profile") and method == "GET":
@@ -421,8 +509,6 @@ def create_dashboard_router(
             return "people.manage"
         if path.startswith("/admin/api/analysis") and method != "GET":
             return "people.manage"
-        if path.startswith("/admin/api/editorial-automation") and method != "GET":
-            return "editorial.manage"
         if path.startswith("/admin/api/messages") and method != "GET":
             return "messages.review"
         if path.startswith("/admin/api/editorial-drafts") and method != "GET":
@@ -443,6 +529,17 @@ def create_dashboard_router(
             return "system.manage"
         return "dashboard.view"
 
+    def request_api_token(request: Request) -> str | None:
+        auth = str(request.headers.get("authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+            if token:
+                return token
+        header = str(
+            request.headers.get("x-api-key") or request.headers.get("X-Api-Key") or ""
+        ).strip()
+        return header or None
+
     async def resolve_principal(
         request: Request,
         credentials: HTTPBasicCredentials | None,
@@ -452,6 +549,13 @@ def create_dashboard_router(
         principal = await db.principal_from_session(
             request.cookies.get("garaye_session")
         )
+        if principal:
+            return principal
+        api_token = request_api_token(request)
+        if api_token:
+            principal = await db.principal_from_api_key(api_token)
+            if principal:
+                return principal
         bootstrap_valid = bool(
             credentials
             and secrets.compare_digest(credentials.username, settings.admin_username)
@@ -476,10 +580,13 @@ def create_dashboard_router(
     ) -> str:
         principal = await resolve_principal(request, credentials)
         if not principal:
+            headers = {}
+            if not request_api_token(request):
+                headers["WWW-Authenticate"] = 'Basic realm="Garaye Dashboard"'
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="نام کاربری یا رمز عبور نادرست است.",
-                headers={"WWW-Authenticate": 'Basic realm="Garaye Dashboard"'},
+                headers=headers,
             )
         permission = required_permission(request)
         if not principal.can(permission):
@@ -770,6 +877,159 @@ def create_dashboard_router(
             "version": current_version(),
         }
 
+    def require_named_account(request: Request) -> int:
+        principal: AdminPrincipal = request.state.admin_principal
+        if principal.user_id is None:
+            raise HTTPException(
+                422,
+                "ساخت و مدیریت کلید API فقط برای حساب‌های ثبت‌شده در سامانه ممکن است.",
+            )
+        return int(principal.user_id)
+
+    @router.get("/admin/api/api-keys")
+    async def list_api_keys(
+        request: Request,
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        user_id = require_named_account(request)
+        return {"items": await db.list_api_keys(user_id)}
+
+    @router.post("/admin/api/api-keys")
+    async def create_api_key(
+        payload: ApiKeyCreate,
+        request: Request,
+        actor: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        user_id = require_named_account(request)
+        try:
+            created = await db.create_api_key(user_id, payload.name)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await audit(
+            request,
+            actor,
+            "api_key_created",
+            object_type="api_key",
+            object_id=str(created["api_key_id"]),
+            details={"name": created["name"], "token_prefix": created["token_prefix"]},
+        )
+        return created
+
+    @router.delete("/admin/api/api-keys/{api_key_id}")
+    async def revoke_api_key(
+        api_key_id: int,
+        request: Request,
+        actor: str = Depends(admin_identity),
+    ) -> dict[str, bool]:
+        user_id = require_named_account(request)
+        ok = await db.revoke_api_key(user_id, api_key_id)
+        if not ok:
+            raise HTTPException(404, "کلید پیدا نشد.")
+        await audit(
+            request,
+            actor,
+            "api_key_revoked",
+            object_type="api_key",
+            object_id=str(api_key_id),
+        )
+        return {"ok": True}
+
+    @router.get("/admin/api/eitan-axes")
+    async def list_eitan_axes(
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        return {"items": await db.list_eitan_axes()}
+
+    @router.post("/admin/api/eitan-axes")
+    async def create_eitan_axis(
+        request: Request,
+        actor: str = Depends(admin_identity),
+        title: str = Form(...),
+        library_file: UploadFile = File(...),
+    ) -> dict[str, Any]:
+        try:
+            library = parse_eitan_library_upload(
+                library_file.filename,
+                await library_file.read(),
+            )
+            created = await db.create_eitan_axis(
+                title=title,
+                library_json=library.as_json(),
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await audit(
+            request,
+            actor,
+            "eitan_axis_created",
+            object_type="eitan_axis",
+            object_id=str(created.get("axis_id") or ""),
+            details={"title": created.get("title"), "library": created.get("library")},
+        )
+        return created
+
+    @router.post("/admin/api/eitan-axes/{axis_id}/library")
+    async def replace_eitan_axis_library(
+        axis_id: str,
+        request: Request,
+        actor: str = Depends(admin_identity),
+        library_file: UploadFile = File(...),
+    ) -> dict[str, Any]:
+        try:
+            library = parse_eitan_library_upload(
+                library_file.filename,
+                await library_file.read(),
+            )
+            updated = await db.update_eitan_axis_library(
+                axis_id,
+                library_json=library.as_json(),
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await audit(
+            request,
+            actor,
+            "eitan_axis_library_replaced",
+            object_type="eitan_axis",
+            object_id=str(axis_id),
+            details={"library": updated.get("library")},
+        )
+        return updated
+
+    @router.get("/admin/api/eitan-axes/{axis_id}/messages")
+    async def eitan_axis_messages(
+        axis_id: str,
+        limit: int = Query(20, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        axis = await db.get_eitan_axis(axis_id)
+        if not axis:
+            raise HTTPException(404, "محور پیدا نشد.")
+        groups = db.eitan_search_groups(axis)
+        result = await db.list_messages_dashboard(
+            term_groups=groups,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            **result,
+            "axis": eitan_axis_public(axis),
+            "terms_count": sum(len(group) for group in groups),
+            "group_count": len(groups),
+        }
+
+    @router.get("/admin/api/eitan-axes/{axis_id}/insights")
+    async def eitan_axis_insights(
+        axis_id: str,
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        axis = await db.get_eitan_axis(axis_id)
+        if not axis:
+            raise HTTPException(404, "محور پیدا نشد.")
+        insights = await db.eitan_axis_insights(axis)
+        return {"axis": eitan_axis_public(axis), **insights}
+
     @router.get("/admin/api/me/profile")
     async def current_admin_profile(
         request: Request,
@@ -978,26 +1238,20 @@ def create_dashboard_router(
         date_to: str | None = None,
         date_from_jalali: str | None = None,
         date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         limit: int = 500,
         offset: int = 0,
         _: str = Depends(admin_identity),
     ) -> dict[str, Any]:
         try:
             effective_from = (
-                _jalali_local_to_utc_iso(
-                    date_from_jalali,
-                    "Asia/Tehran",
-                    end_of_day=False,
-                )
+                _jalali_window_utc(date_from_jalali, time_from, "Asia/Tehran", end_of_day=False)
                 if date_from_jalali
                 else date_from
             )
             effective_to = (
-                _jalali_local_to_utc_iso(
-                    date_to_jalali,
-                    "Asia/Tehran",
-                    end_of_day=True,
-                )
+                _jalali_window_utc(date_to_jalali, time_to, "Asia/Tehran", end_of_day=True)
                 if date_to_jalali
                 else date_to
             )
@@ -1013,30 +1267,58 @@ def create_dashboard_router(
             offset=offset,
         )
 
+    @router.get("/admin/api/messages/ids")
+    async def message_ids(
+        status_value: str | None = Query(None, alias="status"),
+        source_chat_id: int | None = None,
+        q: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        date_from_jalali: str | None = None,
+        date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
+        _: str = Depends(admin_identity),
+    ) -> dict[str, Any]:
+        try:
+            effective_from = (
+                _jalali_window_utc(date_from_jalali, time_from, "Asia/Tehran", end_of_day=False)
+                if date_from_jalali
+                else date_from
+            )
+            effective_to = (
+                _jalali_window_utc(date_to_jalali, time_to, "Asia/Tehran", end_of_day=True)
+                if date_to_jalali
+                else date_to
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return await db.list_message_ids_dashboard(
+            status=status_value,
+            source_chat_id=source_chat_id,
+            query=q,
+            date_from=effective_from,
+            date_to=effective_to,
+        )
+
     @router.get("/admin/api/messages/progress")
     async def message_window_progress(
         date_from: str | None = None,
         date_to: str | None = None,
         date_from_jalali: str | None = None,
         date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         _: str = Depends(admin_identity),
     ) -> dict[str, Any]:
         try:
             effective_from = (
-                _jalali_local_to_utc_iso(
-                    date_from_jalali,
-                    "Asia/Tehran",
-                    end_of_day=False,
-                )
+                _jalali_window_utc(date_from_jalali, time_from, "Asia/Tehran", end_of_day=False)
                 if date_from_jalali
                 else date_from
             )
             effective_to = (
-                _jalali_local_to_utc_iso(
-                    date_to_jalali,
-                    "Asia/Tehran",
-                    end_of_day=True,
-                )
+                _jalali_window_utc(date_to_jalali, time_to, "Asia/Tehran", end_of_day=True)
                 if date_to_jalali
                 else date_to
             )
@@ -1058,14 +1340,6 @@ def create_dashboard_router(
                 payload.message_ids,
                 actor=actor,
             )
-            resolved_ids = [
-                int(item["message_id"])
-                for item in result.get("results", [])
-                if item.get("ok") and item.get("message_id") is not None
-            ]
-            result["human_control_candidates"] = await editorial_automation.reconcile_speakers(
-                resolved_ids
-            )
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
         await audit(
@@ -1082,113 +1356,18 @@ def create_dashboard_router(
         )
         return result
 
-    @router.get("/admin/api/editorial-automation")
-    async def editorial_automation_status(_: str = Depends(admin_identity)) -> dict[str, Any]:
-        return await editorial_automation.status()
-
-    @router.post("/admin/api/editorial-automation/analysis/start")
-    async def start_editorial_automation(
-        payload: AutomationStageStart,
-        request: Request,
-        actor: str = Depends(admin_identity),
-    ) -> dict[str, Any]:
-        try:
-            start_at = _automation_start_to_utc_iso(payload)
-            state = await editorial_automation.enable_analysis(start_at=start_at)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        await db.add_system_event(
-            "editorial_automation", "INFO", "analysis_automation_started",
-            "Operator enabled the ten-minute first-stage analysis.",
-            {"actor": actor, "start_at": start_at},
-        )
-        await audit(
-            request, actor, "editorial_automation_analysis_started",
-            object_type="editorial_automation", details={"start_at": start_at},
-        )
-        return state
-
-    @router.post("/admin/api/editorial-automation/analysis/stop")
-    async def stop_editorial_automation(
-        request: Request, actor: str = Depends(admin_identity)
-    ) -> dict[str, Any]:
-        state = await editorial_automation.disable_analysis()
-        await db.add_system_event(
-            "editorial_automation", "INFO", "analysis_automation_stopped",
-            "Operator paused the automated editorial workflow.", {"actor": actor},
-        )
-        await audit(request, actor, "editorial_automation_stopped", object_type="editorial_automation")
-        return state
-
-    @router.post("/admin/api/editorial-automation/drafts/start")
-    async def start_editorial_drafts_automation(
-        payload: AutomationStageStart,
-        request: Request,
-        actor: str = Depends(admin_identity),
-    ) -> dict[str, Any]:
-        try:
-            start_at = _automation_start_to_utc_iso(payload)
-            state = await editorial_automation.enable_drafts(start_at=start_at)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        await db.add_system_event(
-            "editorial_automation", "INFO", "draft_automation_started",
-            "Operator enabled the three-hour second-stage draft generation.",
-            {"actor": actor, "start_at": start_at},
-        )
-        await audit(
-            request, actor, "editorial_automation_drafts_started",
-            object_type="editorial_automation", details={"start_at": start_at},
-        )
-        return state
-
-    @router.post("/admin/api/editorial-automation/drafts/stop")
-    async def stop_editorial_drafts_automation(
-        request: Request, actor: str = Depends(admin_identity)
-    ) -> dict[str, Any]:
-        state = await editorial_automation.disable_drafts()
-        await db.add_system_event(
-            "editorial_automation", "INFO", "draft_automation_stopped",
-            "Operator paused the automated second-stage draft generation.", {"actor": actor},
-        )
-        await audit(
-            request, actor, "editorial_automation_drafts_stopped",
-            object_type="editorial_automation",
-        )
-        return state
-
-    @router.post("/admin/api/editorial-automation/analysis/run-now")
-    async def run_editorial_analysis_now(
-        request: Request, actor: str = Depends(admin_identity)
-    ) -> dict[str, Any]:
-        try:
-            result = await editorial_automation.run_analysis_now()
-        except RuntimeError as exc:
-            raise HTTPException(503, str(exc)) from exc
-        await audit(request, actor, "editorial_automation_analysis_run_now", object_type="editorial_automation")
-        return result
-
-    @router.post("/admin/api/editorial-automation/drafts/run-now")
-    async def run_editorial_drafts_now(
-        request: Request, actor: str = Depends(admin_identity)
-    ) -> dict[str, Any]:
-        try:
-            result = await editorial_automation.run_drafts_now()
-        except RuntimeError as exc:
-            raise HTTPException(503, str(exc)) from exc
-        await audit(request, actor, "editorial_automation_draft_run_now", object_type="editorial_automation")
-        return result
-
     @router.get("/admin/api/analysis/filters")
     async def analysis_filters(
         date_from_jalali: str | None = None,
         date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         timezone_name: str = Query("Asia/Tehran", alias="timezone"),
         _: str = Depends(admin_identity),
     ) -> dict[str, Any]:
         try:
-            date_from = _jalali_local_to_utc_iso(date_from_jalali, timezone_name, end_of_day=False) if date_from_jalali else None
-            date_to = _jalali_local_to_utc_iso(date_to_jalali, timezone_name, end_of_day=True) if date_to_jalali else None
+            date_from = _jalali_window_utc(date_from_jalali, time_from, timezone_name, end_of_day=False) if date_from_jalali else None
+            date_to = _jalali_window_utc(date_to_jalali, time_to, timezone_name, end_of_day=True) if date_to_jalali else None
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         return await db.analysis_filter_catalog(date_from=date_from, date_to=date_to)
@@ -1203,18 +1382,20 @@ def create_dashboard_router(
         date_to: str | None = None,
         date_from_jalali: str | None = None,
         date_to_jalali: str | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         timezone_name: str = Query("Asia/Tehran", alias="timezone"),
         limit: int = 2000,
         _: str = Depends(admin_identity),
     ) -> list[dict[str, Any]]:
         try:
             effective_from = (
-                _jalali_local_to_utc_iso(date_from_jalali, timezone_name, end_of_day=False)
+                _jalali_window_utc(date_from_jalali, time_from, timezone_name, end_of_day=False)
                 if date_from_jalali
                 else date_from
             )
             effective_to = (
-                _jalali_local_to_utc_iso(date_to_jalali, timezone_name, end_of_day=True)
+                _jalali_window_utc(date_to_jalali, time_to, timezone_name, end_of_day=True)
                 if date_to_jalali
                 else date_to
             )
@@ -1319,6 +1500,42 @@ def create_dashboard_router(
         if not item:
             raise HTTPException(404, "پیام پیدا نشد.")
         return item
+
+    @router.get("/admin/api/messages/{message_id}/media/{media_index}")
+    async def message_media(
+        message_id: int,
+        media_index: int,
+        _: str = Depends(admin_identity),
+    ) -> Response:
+        if bale is None or not bale.enabled:
+            raise HTTPException(503, "اتصال بله برای دریافت رسانه در دسترس نیست.")
+        item = await db.get_message(message_id)
+        if not item:
+            raise HTTPException(404, "پیام پیدا نشد.")
+        assets = message_media_assets(item)
+        if media_index < 0 or media_index >= len(assets):
+            raise HTTPException(404, "رسانه پیدا نشد.")
+        asset = assets[media_index]
+        file_id = str(asset.get("file_id") or "").strip()
+        if not file_id:
+            raise HTTPException(404, "شناسه فایل رسانه موجود نیست.")
+        if asset.get("too_large"):
+            raise HTTPException(413, "حجم این فایل از سقف ۲۰ مگابایت بله بیشتر است.")
+        try:
+            payload, upstream_mime, file_path = await bale.download_by_file_id(file_id)
+        except BaleAPIError as exc:
+            raise HTTPException(502, f"دریافت فایل از بله ممکن نشد: {exc}") from exc
+        if len(payload) > BALE_MEDIA_MAX_BYTES + 1024:
+            raise HTTPException(413, "حجم این فایل از سقف ۲۰ مگابایت بله بیشتر است.")
+        if not payload:
+            raise HTTPException(502, "فایل دریافتی از بله خالی بود.")
+        mime = resolve_media_mime(asset, file_path=file_path, upstream_mime=upstream_mime)
+        headers = {"Cache-Control": "private, max-age=300"}
+        file_name = str(asset.get("file_name") or "").strip()
+        if file_name:
+            ascii_name = re.sub(r"[^A-Za-z0-9._-]+", "_", file_name).strip("._")[:80] or "media"
+            headers["Content-Disposition"] = f'inline; filename="{ascii_name}"'
+        return Response(content=payload, media_type=mime, headers=headers)
 
     @router.put("/admin/api/messages/{message_id}/rating")
     async def save_message_rating(
@@ -1617,7 +1834,6 @@ def create_dashboard_router(
                 "ai_concurrency_per_key": settings.ai_concurrency_per_key,
                 "ai_profiles": ai_runtime.get("profiles", {}),
                 "scheduler_enabled": settings.scheduler_enabled,
-                "editorial_automation": await editorial_automation.status(),
                 "crawler": {
                     "enabled": settings.crawler_enabled,
                     "channels_file": str(settings.crawler_channels_path),
@@ -1630,6 +1846,10 @@ def create_dashboard_router(
                 },
             },
         }
+
+    @router.get("/admin/api/system/gapgpt-status")
+    async def gapgpt_status(_: str = Depends(admin_identity)) -> dict[str, Any]:
+        return await fetch_gapgpt_status()
 
     def read_crawler_channels() -> list[str]:
         path = settings.crawler_channels_path
@@ -1734,8 +1954,8 @@ def create_dashboard_router(
         starting it here therefore survives page reloads and avoids a second
         process when it is already running.
         """
-        script_path = (WEB_ROOT.parent / "crawler" / "bale_crawler_api_sender.py").resolve()
-        if not script_path.is_file():
+        worker_path = (WEB_ROOT.parent / "crawler" / "bale_crawler_api_sender.py").resolve()
+        if not worker_path.is_file():
             raise HTTPException(503, "فایل اجرایی کرولر پیدا نشد.")
         old_pid = crawler_process_id()
         if crawler_is_running(old_pid):
@@ -1755,7 +1975,7 @@ def create_dashboard_router(
             stderr_handle = stderr_path.open("ab")
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             process = subprocess.Popen(
-                [sys.executable, str(script_path)],
+                [sys.executable, "-m", "app.crawler_launcher"],
                 cwd=str(WEB_ROOT.parent),
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_handle,
@@ -1774,7 +1994,7 @@ def create_dashboard_router(
         await db.set_setting("crawler_runtime_enabled", "true")
         await db.add_system_event(
             "crawler", "INFO", "crawler_started_from_dashboard",
-            "Selenium crawler started from automation dashboard.",
+            "Selenium crawler started from monitoring sources.",
             {"actor": actor, "pid": process.pid},
         )
         await audit(request, actor, "crawler_started", object_type="crawler", details={"pid": process.pid})
@@ -2288,7 +2508,7 @@ def create_dashboard_router(
             event_time = payload.event_time or source.get("analysis_event_time")
             oration_location = None
             title = payload.title or str(event_title)
-            category_name = payload.category_name or "رویدادهای مهم ایران و جهان"
+            category_name = payload.category_name or "وقایع و رویدادهای مهم ایران و جهان"
         else:
             matched_person = (
                 await db.find_person(payload.person_name)
@@ -2425,6 +2645,7 @@ def create_dashboard_router(
                 main_subject=payload.main_subject,
                 oration_location=payload.oration_location,
                 source_url=payload.source_url,
+                footnote=payload.footnote,
                 expected_version=payload.expected_version,
                 change_reason=payload.change_reason,
                 actor=actor,
@@ -2554,6 +2775,7 @@ def create_dashboard_router(
                     main_subject=draft.get("main_subject"),
                     oration_location=draft.get("oration_location"),
                     source_url=draft.get("source_url"),
+                    footnote=draft.get("footnote"),
                     expected_version=payload.expected_version,
                     change_reason=(
                         "تولید و ذخیره خودکار محتوا با مدل دوم"

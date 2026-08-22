@@ -6,31 +6,20 @@ from pydantic import BaseModel, Field, HttpUrl
 
 
 CATEGORY_ORDER: tuple[tuple[str, str], ...] = (
+    ("events", "وقایع و رویدادهای مهم ایران و جهان"),
     ("government", "مسئولان دولت"),
     ("parliament", "نمایندگان مجلس شورای اسلامی"),
-    ("sovereign", "سایر مسئولان حاکمیتی"),
-    ("armed_forces", "فرماندهان نیروهای مسلح"),
-    ("politicians", "سیاسیون"),
-    ("religious", "علمای دینی"),
+    ("officials_politicians", "سایر مسئولان و سیاسیون"),
     ("academics", "اساتید دانشگاه و نخبگان"),
-    ("experts", "کارشناسان"),
-    ("journalists", "روزنامه‌نگاران و انسان‌رسانه‌ها"),
-    ("other", "سایر افراد"),
-    ("events", "رویدادهای مهم ایران و جهان"),
+    ("journalists", "روزنامه‌نگاران و افراد رسانه‌ای"),
+    ("armed_forces", "شخصیت‌های نظامی"),
+    ("artists", "چهره‌ها و هنرمندان"),
+    ("foreign", "شخصیت‌های خارجی"),
 )
 
 CATEGORY_ALIASES: dict[str, set[str]] = {
-    "government": {"مسئولان دولت", "دولت", "قوه مجریه", "وزرا", "مسئول دولتی"},
-    "parliament": {"نمایندگان مجلس", "نمایندگان مجلس شورای اسلامی", "مجلس", "نماینده مجلس"},
-    "sovereign": {"سایر مسئولان حاکمیتی", "مسئولان حاکمیتی", "حاکمیتی", "قوه قضاییه", "شوراها"},
-    "armed_forces": {"فرماندهان نیروهای مسلح", "نظامی", "فرماندهان", "نیروهای مسلح"},
-    "politicians": {"سیاسیون", "فعال سیاسی", "احزاب", "چهره سیاسی"},
-    "religious": {"علمای دینی", "روحانیون", "علما", "مراجع", "ائمه جمعه"},
-    "academics": {"اساتید دانشگاه و نخبگان", "اساتید دانشگاه", "نخبگان", "دانشگاهیان", "استاد دانشگاه"},
-    "experts": {"کارشناسان", "کارشناس", "پژوهشگران", "اندیشکده"},
-    "journalists": {"روزنامه‌نگاران و انسان‌رسانه‌ها", "روزنامه نگاران", "روزنامه‌نگاران", "رسانه", "انسان‌رسانه", "خبرنگاران"},
-    "other": {"سایر افراد", "سایر", "نامشخص", ""},
     "events": {
+        "وقایع و رویدادهای مهم ایران و جهان",
         "رویدادهای مهم ایران و جهان",
         "رویداد مهم ایران و جهان",
         "رویداد",
@@ -38,6 +27,75 @@ CATEGORY_ALIASES: dict[str, set[str]] = {
         "اخبار رویداد",
         "event",
         "events",
+    },
+    "government": {"مسئولان دولت", "دولت", "قوه مجریه", "وزرا", "مسئول دولتی"},
+    "parliament": {"نمایندگان مجلس", "نمایندگان مجلس شورای اسلامی", "مجلس", "نماینده مجلس"},
+    "officials_politicians": {
+        "سایر مسئولان و سیاسیون",
+        "سایر مسئولان",
+        "سایر مسئولان حاکمیتی",
+        "مسئولان حاکمیتی",
+        "حاکمیتی",
+        "قوه قضاییه",
+        "شوراها",
+        "سیاسیون",
+        "فعال سیاسی",
+        "احزاب",
+        "چهره سیاسی",
+        "علمای دینی",
+        "روحانیون",
+        "علما",
+        "مراجع",
+        "ائمه جمعه",
+        "سایر افراد",
+        "سایر",
+        "نامشخص",
+        "",
+    },
+    "academics": {
+        "اساتید دانشگاه و نخبگان",
+        "اساتید دانشگاه",
+        "نخبگان",
+        "دانشگاهیان",
+        "استاد دانشگاه",
+        "کارشناسان",
+        "کارشناس",
+        "پژوهشگران",
+        "اندیشکده",
+    },
+    "journalists": {
+        "روزنامه‌نگاران و افراد رسانه‌ای",
+        "روزنامه نگاران و افراد رسانه‌ای",
+        "روزنامه‌نگاران و انسان‌رسانه‌ها",
+        "روزنامه نگاران",
+        "روزنامه‌نگاران",
+        "رسانه",
+        "انسان‌رسانه",
+        "خبرنگاران",
+        "افراد رسانه‌ای",
+    },
+    "armed_forces": {
+        "شخصیت‌های نظامی",
+        "فرماندهان نیروهای مسلح",
+        "نظامی",
+        "فرماندهان",
+        "نیروهای مسلح",
+    },
+    "artists": {
+        "چهره‌ها و هنرمندان",
+        "هنرمندان",
+        "چهره‌ها",
+        "سینما",
+        "بازیگر",
+        "خواننده",
+        "ورزشکار",
+    },
+    "foreign": {
+        "شخصیت‌های خارجی",
+        "خارجی",
+        "بین‌الملل",
+        "مقام خارجی",
+        "رهبران خارجی",
     },
 }
 
@@ -47,6 +105,8 @@ REGISTRY_CATEGORY_OPTIONS: tuple[str, ...] = tuple(
 
 PERSIAN_SECTION_LETTERS = ("الف", "ب", "پ", "ت", "ث", "ج", "چ", "ح", "خ", "د")
 
+EVENT_CATEGORY_TITLES = CATEGORY_ALIASES["events"]
+
 
 def category_key(category: str | None) -> str:
     clean = " ".join(str(category or "").replace("ي", "ی").replace("ك", "ک").split())
@@ -55,16 +115,15 @@ def category_key(category: str | None) -> str:
             return key
     lowered = clean.lower()
     heuristics = (
-        ("events", ("رویداد مهم", "رویدادهای مهم")),
+        ("events", ("رویداد مهم", "رویدادهای مهم", "وقایع و رویداد")),
         ("government", ("دولت", "وزیر", "معاون رئیس", "استاندار")),
         ("parliament", ("مجلس", "نماینده")),
         ("armed_forces", ("فرمانده", "سپاه", "ارتش", "نظامی")),
-        ("religious", ("آیت", "حجت", "امام جمعه", "روحانی")),
-        ("academics", ("دانشگاه", "استاد", "نخبه")),
+        ("artists", ("هنرمند", "بازیگر", "خواننده", "سینما", "چهره")),
+        ("foreign", ("خارجی", "بین‌الملل", "سفیر", "رئیس‌جمهور")),
+        ("academics", ("دانشگاه", "استاد", "نخبه", "کارشناس", "پژوهشگر", "تحلیلگر")),
         ("journalists", ("روزنامه", "خبرنگار", "رسانه")),
-        ("experts", ("کارشناس", "پژوهشگر", "تحلیلگر")),
-        ("politicians", ("سیاسی", "حزب", "دبیرکل")),
-        ("sovereign", ("قوه", "شورا", "حاکمیتی")),
+        ("officials_politicians", ("سیاسی", "حزب", "دبیرکل", "قوه", "شورا", "حاکمیتی", "روحانی")),
     )
     for key, words in heuristics:
         if any(word.lower() in lowered for word in words):
@@ -73,17 +132,25 @@ def category_key(category: str | None) -> str:
     # people linked to a free-text شناسنامه category do not collapse into «سایر».
     if clean and clean not in {"سایر", "سایر افراد", "نامشخص"}:
         return f"custom:{clean}"
-    return "other"
+    return "officials_politicians"
 
 
 def category_section_title(key: str, fallback: str | None = None) -> str:
     if key.startswith("custom:"):
-        return key.split(":", 1)[1] or (fallback or "سایر افراد")
-    return dict(CATEGORY_ORDER).get(key, fallback or "سایر افراد")
+        return key.split(":", 1)[1] or (fallback or "سایر مسئولان و سیاسیون")
+    return dict(CATEGORY_ORDER).get(key, fallback or "سایر مسئولان و سیاسیون")
 
 
 def category_title(key: str) -> str:
     return category_section_title(key)
+
+
+def is_event_category(value: str | None) -> bool:
+    clean = " ".join(str(value or "").replace("ي", "ی").replace("ك", "ک").split())
+    if clean in EVENT_CATEGORY_TITLES or category_key(clean) == "events":
+        return True
+    lowered = clean.casefold()
+    return lowered in {"event", "events", "رویداد"}
 
 
 class BulletinMeta(BaseModel):
@@ -121,7 +188,7 @@ class BulletinStatement(BaseModel):
     statement_id: str
     person_id: int | None = None
     topic: str
-    category: str = "سایر"
+    category: str = "سایر مسئولان و سیاسیون"
     detail: str = ""
     # سوژهٔ اصلی کوتاهِ خبر؛ از تحلیل مدل اول می‌آید و در میز تدوین قابل
     # اصلاح است. «topic» همچنان موضوع کلی برای رنگ و برچسب عمودی است.
@@ -154,6 +221,7 @@ class BulletinStatement(BaseModel):
     editorial_order: int = 0
     merged_statement_ids: list[str] = Field(default_factory=list)
     public_exclusion_reason: str | None = None
+    footnote: str = ""
 
 
 class BulletinPerson(BaseModel):

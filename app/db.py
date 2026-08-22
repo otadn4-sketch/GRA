@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import re
 from collections import Counter
@@ -8,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.parse import urlparse
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import aiosqlite
@@ -17,10 +20,21 @@ from .auth import (
     VALID_ROLES,
     AdminPrincipal,
     hash_password,
+    new_api_token,
     new_session_token,
     token_digest,
     verify_password,
 )
+from .eitan_library import (
+    EITAN_INSIGHT_SAMPLE_LIMIT,
+    EITAN_SEARCH_GROUP_LIMIT,
+    EITAN_SEARCH_TERM_LIMIT,
+    build_eitan_insights,
+    eitan_search_groups as build_eitan_search_groups,
+    library_from_axis,
+    library_from_parts,
+)
+from .near_duplicate import is_near_duplicate, message_body
 from .persian_text import canonical_key, normalize_persian
 from .wordcloud import WORD_CLOUD_WEIGHTS, content_words, ranked_word_cloud
 
@@ -416,7 +430,7 @@ def _sender_profile_key(record: dict[str, Any]) -> str:
 def _media_payload(message: dict[str, Any]) -> tuple[str, str, int]:
     media: list[dict[str, Any]] = []
     message_type = "text"
-    for kind in ("photo", "video", "document", "audio", "voice", "animation", "sticker"):
+    for kind in ("photo", "video", "document", "audio", "voice", "animation", "sticker", "video_note"):
         value = message.get(kind)
         if not value:
             continue
@@ -435,6 +449,297 @@ def _media_payload(message: dict[str, Any]) -> tuple[str, str, int]:
         message_type = "poll"
         media.append({"type": "poll", "item": message["poll"]})
     return message_type, dumps(media), len(media)
+
+
+BALE_MEDIA_MAX_BYTES = 20 * 1024 * 1024
+_MEDIA_KIND_MIME = {
+    "photo": "image/jpeg",
+    "sticker": "image/webp",
+    "video": "video/mp4",
+    "animation": "video/mp4",
+    "video_note": "video/mp4",
+    "audio": "audio/mpeg",
+    "voice": "audio/ogg",
+}
+_MEDIA_SUFFIX_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".ogg": "application/ogg",
+    ".ogv": "video/ogg",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".oga": "audio/ogg",
+    ".wav": "audio/wav",
+    ".opus": "audio/ogg",
+}
+
+
+def _media_text(item: dict[str, Any] | None, *keys: str) -> str:
+    if not isinstance(item, dict):
+        return ""
+    for key in keys:
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _media_int(item: dict[str, Any] | None, *keys: str) -> int:
+    if not isinstance(item, dict):
+        return 0
+    for key in keys:
+        value = item.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _media_file_id(item: dict[str, Any] | None) -> str:
+    return _media_text(item, "file_id", "fileId", "fileID")
+
+
+def _largest_photo_item(items: Any) -> dict[str, Any] | None:
+    if isinstance(items, dict):
+        nested = items.get("sizes") or items.get("items") or items.get("photo")
+        if isinstance(nested, list):
+            items = nested
+        elif _media_file_id(items):
+            return items
+        else:
+            return None
+    if not isinstance(items, list):
+        return None
+    candidates = [item for item in items if _media_file_id(item)]
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda item: (
+            _media_int(item, "file_size", "fileSize"),
+            _media_int(item, "width", "Width") * _media_int(item, "height", "Height"),
+        ),
+    )
+
+
+def _media_play_mode(kind: str, mime_type: str) -> str | None:
+    mime = str(mime_type or "").lower()
+    if kind in {"photo", "sticker"} or mime.startswith("image/"):
+        return "image"
+    if kind in {"video", "animation", "video_note"} or mime.startswith("video/"):
+        return "video"
+    if kind in {"audio", "voice"} or mime.startswith("audio/"):
+        return "audio"
+    return None
+
+
+def _mime_from_name(value: Any) -> str:
+    name = str(value or "").split("?", 1)[0].rsplit("/", 1)[-1].strip().lower()
+    if "." not in name:
+        return ""
+    suffix = "." + name.rsplit(".", 1)[-1]
+    return _MEDIA_SUFFIX_MIME.get(suffix, "")
+
+
+def resolve_media_mime(
+    asset: dict[str, Any] | None,
+    *,
+    file_path: str = "",
+    upstream_mime: str = "",
+) -> str:
+    play = str((asset or {}).get("play") or "")
+    kind = str((asset or {}).get("kind") or "")
+    candidates = [
+        (asset or {}).get("mime_type"),
+        upstream_mime,
+        _mime_from_name((asset or {}).get("file_name")),
+        _mime_from_name(file_path),
+        _MEDIA_KIND_MIME.get(kind, ""),
+    ]
+    for candidate in candidates:
+        mime = str(candidate or "").split(";")[0].strip().lower()
+        if mime and mime not in {"application/octet-stream", "binary/octet-stream", "application/binary"}:
+            if play == "image" and not mime.startswith("image/"):
+                continue
+            if play == "video" and not mime.startswith("video/") and mime not in {"application/ogg", "application/mp4"}:
+                continue
+            if play == "audio" and not mime.startswith("audio/") and mime not in {"application/ogg", "application/mp4"}:
+                continue
+            if mime == "application/ogg":
+                return "video/ogg" if play == "video" else "audio/ogg"
+            if mime == "application/mp4":
+                return "video/mp4" if play == "video" else "audio/mp4"
+            return mime
+    if play == "image":
+        return "image/jpeg"
+    if play == "video":
+        return "video/mp4"
+    if play == "audio":
+        return "audio/mpeg"
+    return "application/octet-stream"
+
+
+def _media_asset_from_file(kind: str, item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    file_id = _media_file_id(item)
+    if not file_id:
+        return None
+    mime_type = (
+        _media_text(item, "mime_type", "mimeType")
+        or _mime_from_name(_media_text(item, "file_name", "fileName"))
+        or _MEDIA_KIND_MIME.get(kind, "")
+    )
+    play = _media_play_mode(kind, mime_type)
+    if kind == "document" and not play:
+        return None
+    if not play:
+        return None
+    file_size = _media_int(item, "file_size", "fileSize")
+    duration = item.get("duration")
+    if duration in (None, ""):
+        duration = item.get("durationSeconds")
+    return {
+        "kind": kind,
+        "play": play,
+        "file_id": file_id,
+        "mime_type": mime_type or None,
+        "file_name": _media_text(item, "file_name", "fileName") or None,
+        "duration": duration,
+        "width": item.get("width") if item.get("width") is not None else item.get("Width"),
+        "height": item.get("height") if item.get("height") is not None else item.get("Height"),
+        "file_size": file_size or None,
+        "too_large": file_size > BALE_MEDIA_MAX_BYTES,
+    }
+
+
+def extract_message_media_assets(media_payload: Any) -> list[dict[str, Any]]:
+    blocks = loads(media_payload, []) or []
+    if isinstance(blocks, dict):
+        blocks = [blocks]
+    if not isinstance(blocks, list):
+        return []
+    assets: list[dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        kind = str(block.get("type") or "").strip().lower()
+        if kind == "photo":
+            photo = _largest_photo_item(block.get("items") if block.get("items") is not None else block.get("item"))
+            asset = _media_asset_from_file("photo", photo)
+        else:
+            asset = _media_asset_from_file(kind, block.get("item") if isinstance(block.get("item"), dict) else block)
+        if asset:
+            assets.append(asset)
+    return _dedupe_media_assets(assets)
+
+
+_KIND_RANK = {
+    "photo": 5,
+    "video": 5,
+    "audio": 5,
+    "animation": 4,
+    "video_note": 3,
+    "voice": 3,
+    "sticker": 2,
+    "document": 1,
+}
+
+
+def _media_asset_sort_key(asset: dict[str, Any]) -> tuple[int, int, int]:
+    return (
+        _KIND_RANK.get(str(asset.get("kind") or ""), 0),
+        int(asset.get("file_size") or 0),
+        int(asset.get("width") or 0) * int(asset.get("height") or 0),
+    )
+
+
+def _dedupe_media_assets(assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one visible image, video, and audio per message.
+
+    Bale often sends the same clip both as ``photo``/``video`` and as
+    ``document``, or stores two photo sizes as separate blocks. Stream cards
+    should show each of those once.
+    """
+    if len(assets) <= 1:
+        return assets
+    by_file_id: dict[str, dict[str, Any]] = {}
+    rest: list[dict[str, Any]] = []
+    for asset in assets:
+        file_id = str(asset.get("file_id") or "").strip()
+        if not file_id:
+            rest.append(asset)
+            continue
+        current = by_file_id.get(file_id)
+        if current is None or _media_asset_sort_key(asset) > _media_asset_sort_key(current):
+            by_file_id[file_id] = asset
+    unique = list(by_file_id.values()) + rest
+    best_by_play: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for asset in unique:
+        play = str(asset.get("play") or "")
+        if not play:
+            continue
+        if play not in best_by_play:
+            order.append(play)
+            best_by_play[play] = asset
+            continue
+        if _media_asset_sort_key(asset) > _media_asset_sort_key(best_by_play[play]):
+            best_by_play[play] = asset
+    return [best_by_play[play] for play in order]
+
+
+def message_media_assets(row: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not row:
+        return []
+    assets = extract_message_media_assets(row.get("media_json"))
+    if assets:
+        return assets
+    raw = loads(row.get("raw_message_json"), {}) or {}
+    if not isinstance(raw, dict) or not raw:
+        return []
+    _, media_json, _ = _media_payload(raw)
+    return extract_message_media_assets(media_json)
+
+
+def public_message_media(row: dict[str, Any] | None) -> list[dict[str, Any]]:
+    message_id = int((row or {}).get("id") or 0)
+    items: list[dict[str, Any]] = []
+    for index, asset in enumerate(message_media_assets(row)):
+        too_large = bool(asset.get("too_large"))
+        items.append(
+            {
+                "index": index,
+                "kind": asset.get("kind"),
+                "play": asset.get("play"),
+                "url": None if too_large or not message_id else f"/admin/api/messages/{message_id}/media/{index}",
+                "mime_type": asset.get("mime_type"),
+                "file_name": asset.get("file_name"),
+                "duration": asset.get("duration"),
+                "file_size": asset.get("file_size"),
+                "too_large": too_large,
+            }
+        )
+    return items
+
+
+def attach_public_message_media(items: list[dict[str, Any]]) -> None:
+    for item in items:
+        item["media_items"] = public_message_media(item)
 
 
 SCHEMA = r"""
@@ -612,6 +917,20 @@ CREATE INDEX IF NOT EXISTS ix_messages_status ON messages(status, received_at DE
 CREATE INDEX IF NOT EXISTS ix_messages_source ON messages(source_chat_id, source_message_id);
 CREATE INDEX IF NOT EXISTS ix_messages_person ON messages(detected_person_id, detected_person_name);
 CREATE INDEX IF NOT EXISTS ix_messages_topic ON messages(detected_topic_id);
+CREATE INDEX IF NOT EXISTS ix_messages_duplicate_of ON messages(duplicate_of);
+
+CREATE TABLE IF NOT EXISTS crawler_send_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin_key TEXT,
+    text_sha256 TEXT,
+    text TEXT,
+    method TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_crawler_send_log_origin
+ON crawler_send_log(origin_key, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_crawler_send_log_hash
+ON crawler_send_log(text_sha256, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS message_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -937,6 +1256,7 @@ CREATE TABLE IF NOT EXISTS bulletin_items (
     editorial_category TEXT,
     editorial_source_url TEXT,
     editorial_qr_code_path TEXT,
+    footnote TEXT,
     summary_method TEXT,
     summary_version TEXT,
     status TEXT NOT NULL DEFAULT 'review_pending',
@@ -1124,6 +1444,7 @@ CREATE TABLE IF NOT EXISTS editorial_drafts (
     source_url TEXT,
     short_url TEXT,
     qr_code_path TEXT,
+    footnote TEXT,
     event_title TEXT,
     event_entities_json TEXT,
     event_location TEXT,
@@ -1171,6 +1492,7 @@ CREATE TABLE IF NOT EXISTS editorial_draft_versions (
     topic_name TEXT,
     main_subject TEXT,
     detail TEXT,
+    footnote TEXT,
     change_reason TEXT,
     actor TEXT,
     created_at TEXT NOT NULL,
@@ -1218,6 +1540,33 @@ CREATE TABLE IF NOT EXISTS short_links (
     updated_at TEXT NOT NULL,
     FOREIGN KEY(draft_id) REFERENCES editorial_drafts(draft_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    api_key_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at TEXT,
+    FOREIGN KEY(user_id) REFERENCES admin_users(user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_api_keys_user
+ON api_keys(user_id, revoked_at);
+
+CREATE TABLE IF NOT EXISTS eitan_axes (
+    axis_id TEXT PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    keywords_text TEXT NOT NULL DEFAULT '',
+    people_text TEXT NOT NULL DEFAULT '',
+    library_json TEXT NOT NULL DEFAULT '',
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_eitan_axes_slug ON eitan_axes(slug);
 """
 
 
@@ -1230,6 +1579,177 @@ DEFAULT_TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("انرژی", ("نفت", "گاز", "برق", "انرژی", "پتروشیمی")),
     ("امنیت و دفاع", ("امنیت", "دفاع", "نظامی", "جنگ", "موشک", "سپاه", "ارتش")),
 )
+
+BUILTIN_EITAN_AXES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        "hormuz",
+        "تنگه هرمز",
+        (
+            "تنگه هرمز",
+            "هرمز",
+            "خلیج فارس",
+            "تنگه",
+            "بندرعباس",
+            "نفتکش",
+            "کشتی",
+            "عبور دریایی",
+            "امنیت دریایی",
+            "بسته شدن تنگه",
+            "ناوگان",
+            "دریای عمان",
+            "قشم",
+            "جاسک",
+            "لاوان",
+            "عبور کشتی",
+            "تنگهٔ هرمز",
+        ),
+        (
+            "مسعود پزشکیان",
+            "محمدباقر قالیباف",
+            "عباس عراقچی",
+            "اسماعیل بقایی",
+            "علی شمخانی",
+            "حسین سلامی",
+            "محمد باقری",
+        ),
+    ),
+    (
+        "energy",
+        "انرژی",
+        (
+            "نفت",
+            "گاز",
+            "برق",
+            "انرژی",
+            "پتروشیمی",
+            "اوپک",
+            "بنزین",
+            "گازوئیل",
+            "نیروگاه",
+            "وزارت نفت",
+            "وزارت نیرو",
+            "صادرات نفت",
+            "قطع برق",
+            "خاموشی",
+            "پالایشگاه",
+            "میعانات گازی",
+            "گاز طبیعی",
+            "سی‌ان‌جی",
+            "میادین نفتی",
+        ),
+        (
+            "محسن پاک‌نژاد",
+            "عباس علی‌آبادی",
+            "جواد اوجی",
+            "بیژن زنگنه",
+            "بیژن نامدار زنگنه",
+            "رضا اردکانیان",
+            "فریدون عباسی",
+        ),
+    ),
+    (
+        "inflation",
+        "تورم",
+        (
+            "تورم",
+            "گرانی",
+            "قیمت",
+            "معیشت",
+            "سبد کالا",
+            "نقدینگی",
+            "بانک مرکزی",
+            "نرخ ارز",
+            "دلار",
+            "گران شدن",
+            "قدرت خرید",
+            "شاخص قیمت",
+            "هزینه زندگی",
+            "یارانه",
+            "کالاهای اساسی",
+            "گرانی کالا",
+        ),
+        (
+            "محمدرضا فرزین",
+            "عبدالناصر همتی",
+            "احسان خاندوزی",
+            "سید علی مدنی‌زاده",
+            "علی مدنی‌زاده",
+        ),
+    ),
+)
+
+_EITAN_TERM_SQL = """(
+    IFNULL(m.normalized_text,'') LIKE ?
+    OR IFNULL(m.text,'') LIKE ?
+    OR IFNULL(m.caption,'') LIKE ?
+    OR IFNULL(m.detected_person_name,'') LIKE ?
+    OR IFNULL(m.sender_name,'') LIKE ?
+    OR EXISTS (
+        SELECT 1 FROM message_speaker_tags st
+        WHERE st.message_id=m.id AND (
+            st.speaker_name LIKE ?
+            OR st.specific_topic LIKE ?
+            OR st.general_topic LIKE ?
+        )
+    )
+)"""
+_EITAN_TERM_PARAM_COUNT = 8
+
+
+def eitan_axis_public(row: dict[str, Any], *, include_terms: bool = False) -> dict[str, Any]:
+    library = library_from_axis(row)
+    payload = {
+        "axis_id": row.get("axis_id"),
+        "slug": row.get("slug"),
+        "title": row.get("title"),
+        "is_builtin": bool(int(row.get("is_builtin") or 0)),
+        "keyword_count": len(library.keywords),
+        "people_count": len(library.people),
+        "library": library.summary(),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+    if include_terms:
+        payload["keywords"] = library.keywords
+        payload["people"] = library.people
+    return payload
+
+
+def _append_eitan_search(where: list[str], params: list[Any], term_groups: list[list[str]] | None) -> bool:
+    cleaned_groups: list[list[str]] = []
+    seen_groups: set[tuple[str, ...]] = set()
+    for group in term_groups or []:
+        terms: list[str] = []
+        seen_terms: set[str] = set()
+        for raw in group:
+            term = normalize_persian(str(raw or "").strip())
+            if len(term) < 2:
+                continue
+            key = canonical_key(term) or term
+            if key in seen_terms:
+                continue
+            seen_terms.add(key)
+            terms.append(term)
+        if not terms:
+            continue
+        marker = tuple(canonical_key(term) or term for term in terms)
+        if marker in seen_groups:
+            continue
+        seen_groups.add(marker)
+        cleaned_groups.append(terms)
+        if len(cleaned_groups) >= EITAN_SEARCH_GROUP_LIMIT:
+            break
+    if not cleaned_groups:
+        return False
+    group_sql: list[str] = []
+    for group in cleaned_groups:
+        parts: list[str] = []
+        for term in group:
+            parts.append(_EITAN_TERM_SQL)
+            params.extend([f"%{term}%"] * _EITAN_TERM_PARAM_COUNT)
+        group_sql.append("(" + " AND ".join(parts) + ")")
+    where.append("(" + " OR ".join(group_sql) + ")")
+    return True
 
 
 class Database:
@@ -1273,6 +1793,14 @@ class Database:
         conn = await self._connect()
         try:
             await conn.executescript(SCHEMA)
+            eitan_columns = {
+                str(row["name"])
+                for row in await (await conn.execute("PRAGMA table_info(eitan_axes)")).fetchall()
+            }
+            if "library_json" not in eitan_columns:
+                await conn.execute(
+                    "ALTER TABLE eitan_axes ADD COLUMN library_json TEXT NOT NULL DEFAULT ''"
+                )
             # A dashboard account may be linked to one Bale sender identity.
             # This is deliberately additive, so old operator accounts and all
             # incoming-message history remain intact after the upgrade.
@@ -1414,6 +1942,7 @@ class Database:
                 "event_location": "TEXT",
                 "event_time": "TEXT",
                 "main_subject": "TEXT",
+                "footnote": "TEXT",
             }.items():
                 if column not in editorial_columns:
                     await conn.execute(f"ALTER TABLE editorial_drafts ADD COLUMN {column} {definition}")
@@ -1426,6 +1955,7 @@ class Database:
                 "topic_name": "TEXT",
                 "main_subject": "TEXT",
                 "detail": "TEXT",
+                "footnote": "TEXT",
             }.items():
                 if column not in version_columns:
                     await conn.execute(f"ALTER TABLE editorial_draft_versions ADD COLUMN {column} {definition}")
@@ -1439,6 +1969,7 @@ class Database:
                 "editorial_category": "TEXT",
                 "editorial_source_url": "TEXT",
                 "editorial_qr_code_path": "TEXT",
+                "footnote": "TEXT",
             }.items():
                 if column not in bulletin_item_columns:
                     await conn.execute(
@@ -1619,6 +2150,7 @@ class Database:
             await conn.commit()
         finally:
             await conn.close()
+        await self.ensure_builtin_eitan_axes()
 
     async def ensure_bootstrap_admin(
         self,
@@ -1983,6 +2515,324 @@ class Database:
             full_name=str(row["full_name"]),
             role=str(row["role"]),
         )
+
+    async def principal_from_api_key(self, token: str | None) -> AdminPrincipal | None:
+        raw = str(token or "").strip()
+        if not raw:
+            return None
+        row = await self._fetchone(
+            """
+            SELECT k.api_key_id,u.user_id,u.username,u.full_name,u.role,u.active
+            FROM api_keys k JOIN admin_users u ON u.user_id=k.user_id
+            WHERE k.token_hash=? AND k.revoked_at IS NULL
+            """,
+            (token_digest(raw),),
+        )
+        if not row or not int(row.get("active") or 0):
+            return None
+        await self._execute(
+            "UPDATE api_keys SET last_used_at=? WHERE api_key_id=?",
+            (utc_now(), int(row["api_key_id"])),
+        )
+        return AdminPrincipal(
+            user_id=int(row["user_id"]),
+            username=str(row["username"]),
+            full_name=str(row["full_name"]),
+            role=str(row["role"]),
+        )
+
+    async def list_api_keys(self, user_id: int) -> list[dict[str, Any]]:
+        return await self._fetchall(
+            """
+            SELECT api_key_id,name,token_prefix,created_at,last_used_at,revoked_at
+            FROM api_keys
+            WHERE user_id=?
+            ORDER BY CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END, created_at DESC
+            """,
+            (int(user_id),),
+        )
+
+    async def create_api_key(self, user_id: int, name: str) -> dict[str, Any]:
+        title = " ".join(str(name or "").split())
+        if not title:
+            raise ValueError("نام کلید را وارد کنید.")
+        if len(title) > 80:
+            raise ValueError("نام کلید نباید بیشتر از ۸۰ نویسه باشد.")
+        token = new_api_token()
+        created = utc_now()
+        key_id = await self._execute(
+            """
+            INSERT INTO api_keys(user_id,name,token_prefix,token_hash,created_at)
+            VALUES (?,?,?,?,?)
+            """,
+            (int(user_id), title, token[:12], token_digest(token), created),
+        )
+        return {
+            "api_key_id": int(key_id),
+            "name": title,
+            "token": token,
+            "token_prefix": token[:12],
+            "created_at": created,
+            "last_used_at": None,
+            "revoked_at": None,
+        }
+
+    async def revoke_api_key(self, user_id: int, api_key_id: int) -> bool:
+        row = await self._fetchone(
+            """
+            SELECT api_key_id,revoked_at FROM api_keys
+            WHERE api_key_id=? AND user_id=?
+            """,
+            (int(api_key_id), int(user_id)),
+        )
+        if not row:
+            return False
+        if row.get("revoked_at"):
+            return True
+        await self._execute(
+            "UPDATE api_keys SET revoked_at=? WHERE api_key_id=? AND user_id=?",
+            (utc_now(), int(api_key_id), int(user_id)),
+        )
+        return True
+
+    async def ensure_builtin_eitan_axes(self) -> None:
+        now = utc_now()
+        for slug, title, keywords, people in BUILTIN_EITAN_AXES:
+            library = library_from_parts(keywords=keywords, people=people, filename=f"builtin:{slug}")
+            axis_id = f"eitan-{slug}"
+            keywords_text = "\n".join(library.keywords)
+            people_text = "\n".join(library.people)
+            library_json = library.as_json()
+            existing = await self._fetchone(
+                "SELECT axis_id FROM eitan_axes WHERE slug=?",
+                (slug,),
+            )
+            if existing:
+                current = await self.get_eitan_axis(str(existing["axis_id"]))
+                library_name = str((current or {}).get("library_json") or "")
+                custom = False
+                if library_name.strip().startswith("{"):
+                    try:
+                        payload = json.loads(library_name)
+                        custom = bool(payload.get("filename")) and not str(payload.get("filename")).startswith("builtin:")
+                    except json.JSONDecodeError:
+                        custom = False
+                if custom:
+                    await self._execute(
+                        "UPDATE eitan_axes SET title=?, is_builtin=1, updated_at=? WHERE slug=? AND is_builtin=1",
+                        (title, now, slug),
+                    )
+                else:
+                    await self._execute(
+                        """
+                        UPDATE eitan_axes
+                        SET title=?, keywords_text=?, people_text=?, library_json=?, is_builtin=1, updated_at=?
+                        WHERE slug=? AND is_builtin=1
+                        """,
+                        (title, keywords_text, people_text, library_json, now, slug),
+                    )
+                continue
+            await self._execute(
+                """
+                INSERT INTO eitan_axes(
+                    axis_id, slug, title, keywords_text, people_text, library_json,
+                    is_builtin, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (axis_id, slug, title, keywords_text, people_text, library_json, now, now),
+            )
+
+    async def list_eitan_axes(self) -> list[dict[str, Any]]:
+        rows = await self._fetchall(
+            """
+            SELECT * FROM eitan_axes
+            ORDER BY is_builtin DESC, created_at ASC, title ASC
+            """
+        )
+        return [eitan_axis_public(row) for row in rows]
+
+    async def get_eitan_axis(self, axis_id: str) -> dict[str, Any] | None:
+        row = await self._fetchone(
+            "SELECT * FROM eitan_axes WHERE axis_id=?",
+            (str(axis_id or "").strip(),),
+        )
+        return row
+
+    async def create_eitan_axis(
+        self,
+        *,
+        title: str,
+        keywords_text: str = "",
+        people_text: str = "",
+        library_json: str = "",
+    ) -> dict[str, Any]:
+        heading = " ".join(str(title or "").split())
+        if not heading:
+            raise ValueError("عنوان محور را وارد کنید.")
+        if len(heading) > 80:
+            raise ValueError("عنوان محور نباید بیشتر از ۸۰ نویسه باشد.")
+        library = library_from_axis(
+            {"library_json": library_json, "keywords_text": keywords_text, "people_text": people_text}
+        )
+        if not library.keywords and not library.people:
+            raise ValueError("فایل کتابخانه باید دست‌کم یک عبارت یا نام داشته باشد.")
+        now = utc_now()
+        axis_id = str(uuid4())
+        slug = f"custom-{axis_id.replace('-', '')[:12]}"
+        await self._execute(
+            """
+            INSERT INTO eitan_axes(
+                axis_id, slug, title, keywords_text, people_text, library_json,
+                is_builtin, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+            """,
+            (
+                axis_id,
+                slug,
+                heading,
+                "\n".join(library.keywords),
+                "\n".join(library.people),
+                library.as_json(),
+                now,
+                now,
+            ),
+        )
+        row = await self.get_eitan_axis(axis_id)
+        return eitan_axis_public(row or {}, include_terms=True)
+
+    async def update_eitan_axis_library(
+        self,
+        axis_id: str,
+        *,
+        library_json: str,
+    ) -> dict[str, Any]:
+        axis = await self.get_eitan_axis(axis_id)
+        if not axis:
+            raise ValueError("محور پیدا نشد.")
+        library = library_from_axis({"library_json": library_json})
+        if not library.keywords and not library.people:
+            raise ValueError("فایل کتابخانه باید دست‌کم یک عبارت یا نام داشته باشد.")
+        await self._execute(
+            """
+            UPDATE eitan_axes
+            SET keywords_text=?, people_text=?, library_json=?, updated_at=?
+            WHERE axis_id=?
+            """,
+            (
+                "\n".join(library.keywords),
+                "\n".join(library.people),
+                library.as_json(),
+                utc_now(),
+                str(axis_id),
+            ),
+        )
+        row = await self.get_eitan_axis(axis_id)
+        return eitan_axis_public(row or {}, include_terms=True)
+
+    def eitan_search_terms(self, axis: dict[str, Any]) -> list[str]:
+        groups = build_eitan_search_groups(library_from_axis(axis))
+        terms: list[str] = []
+        seen: set[str] = set()
+        for group in groups:
+            for term in group:
+                key = canonical_key(term) or term
+                if key in seen:
+                    continue
+                seen.add(key)
+                terms.append(term)
+                if len(terms) >= EITAN_SEARCH_TERM_LIMIT:
+                    return terms
+        return terms
+
+    def eitan_search_groups(self, axis: dict[str, Any]) -> list[list[str]]:
+        return build_eitan_search_groups(library_from_axis(axis))
+
+    async def eitan_axis_insights(self, axis: dict[str, Any]) -> dict[str, Any]:
+        library = library_from_axis(axis)
+        groups = build_eitan_search_groups(library)
+        where = ["1=1"]
+        params: list[Any] = []
+        empty = {
+            "total": 0,
+            "sample_size": 0,
+            "matched_count": 0,
+            "library": library.summary(),
+            "daily": [],
+            "keyword_daily": [],
+            "person_daily": [],
+            "trend": {"days": [], "series": []},
+            "sources": [],
+            "terms": [],
+            "keywords": [],
+            "people": [],
+            "kinds": [],
+            "message_types": [],
+            "clusters": [],
+            "categories": [],
+            "subcategories": [],
+            "subclusters": [],
+            "institutions": [],
+            "roles": [],
+            "heatmap": {"rows": [], "cols": [], "matrix": []},
+            "keyword_flow": [],
+            "cluster_flow": [],
+            "person_flow": [],
+        }
+        if not _append_eitan_search(where, params, groups):
+            return empty
+        clause = " AND ".join(where)
+        total_row = await self._fetchone(
+            f"SELECT COUNT(*) AS c FROM messages m WHERE {clause}", params
+        )
+        sample = await self._fetchall(
+            f"""
+            SELECT COALESCE(m.published_at,m.received_at,m.created_at) AS ts,
+                   m.source_chat_title, m.source_chat_username,
+                   IFNULL(m.message_type,'text') AS message_type,
+                   IFNULL(m.normalized_text,'') AS normalized_text,
+                   IFNULL(m.text,'') AS text,
+                   IFNULL(m.caption,'') AS caption,
+                   IFNULL(m.detected_person_name,'') AS detected_person_name,
+                   IFNULL(m.sender_name,'') AS sender_name
+            FROM messages m
+            WHERE {clause}
+            ORDER BY COALESCE(m.published_at,m.received_at) DESC, m.id DESC
+            LIMIT {int(EITAN_INSIGHT_SAMPLE_LIMIT)}
+            """,
+            params,
+        )
+        import jdatetime
+
+        prepared: list[dict[str, Any]] = []
+        for item in sample:
+            fields = _tehran_flow_fields(item.get("ts"))
+            gregorian = str(fields.get("flow_date") or "")
+            label = gregorian or "نامشخص"
+            if gregorian:
+                try:
+                    year, month, day = (int(part) for part in gregorian.split("-")[:3])
+                    label = jdatetime.date.fromgregorian(date=datetime(year, month, day).date()).strftime("%Y/%m/%d")
+                except (TypeError, ValueError):
+                    label = gregorian
+            prepared.append(
+                {
+                    "day": label,
+                    "source": str(item.get("source_chat_title") or item.get("source_chat_username") or "منبع نامشخص"),
+                    "message_type": str(item.get("message_type") or "text"),
+                    "haystack": " ".join(
+                        [
+                            str(item.get("normalized_text") or ""),
+                            str(item.get("text") or ""),
+                            str(item.get("caption") or ""),
+                            str(item.get("detected_person_name") or ""),
+                            str(item.get("sender_name") or ""),
+                        ]
+                    ),
+                }
+            )
+        insights = build_eitan_insights(library, prepared)
+        insights["total"] = int((total_row or {}).get("c") or 0)
+        return insights
 
     async def revoke_admin_session(self, token: str | None) -> None:
         if token:
@@ -2725,6 +3575,8 @@ class Database:
         status: str | None = None,
         source_chat_id: int | None = None,
         query: str | None = None,
+        terms: list[str] | None = None,
+        term_groups: list[list[str]] | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         limit: int = 100,
@@ -2732,15 +3584,16 @@ class Database:
     ) -> dict[str, Any]:
         where = ["1=1"]
         params: list[Any] = []
+        if term_groups is not None or terms is not None:
+            groups = term_groups if term_groups is not None else [[term] for term in (terms or [])]
+            if not _append_eitan_search(where, params, groups):
+                return {"total": 0, "items": []}
         if status == "analyzed":
             # Analysis is a workflow state layered on top of the source-review
             # status, so it must not be compared to ``messages.status``.
-            where.append(
-                """(m.ai_enrichment_status='validated' OR EXISTS (
-                    SELECT 1 FROM message_speaker_tags analyzed
-                    WHERE analyzed.message_id=m.id
-                ))"""
-            )
+            where.append(self._analyzed_message_sql())
+        elif status == "unanalyzed":
+            where.append(self._unanalyzed_message_sql())
         elif status:
             where.append("m.status=?")
             params.append(status)
@@ -2802,10 +3655,79 @@ class Database:
             _attach_flow_timestamp(item, "published_at", "received_at", "created_at")
         await self._attach_automatic_editorial_ratings(items)
         await self.attach_sender_profile_displays(items)
+        attach_public_message_media(items)
         return {"total": int((total_row or {}).get("c") or 0), "items": items}
 
+    async def list_message_ids_dashboard(
+        self,
+        *,
+        status: str | None = None,
+        source_chat_id: int | None = None,
+        query: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 20000,
+    ) -> dict[str, Any]:
+        where = ["1=1"]
+        params: list[Any] = []
+        if status == "analyzed":
+            where.append(self._analyzed_message_sql())
+        elif status == "unanalyzed":
+            where.append(self._unanalyzed_message_sql())
+        elif status:
+            where.append("m.status=?")
+            params.append(status)
+        if source_chat_id is not None:
+            where.append("m.source_chat_id=?")
+            params.append(source_chat_id)
+        if query:
+            where.append(
+                """(m.normalized_text LIKE ? OR m.sender_name LIKE ?
+                OR m.sender_chat_title LIKE ? OR m.sender_chat_username LIKE ?
+                OR m.forwarded_origin_title LIKE ? OR m.detected_person_name LIKE ?
+                OR m.detected_topic_name LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM message_speaker_tags st
+                    WHERE st.message_id=m.id AND (
+                        st.speaker_name LIKE ? OR st.specific_topic LIKE ?
+                        OR st.general_topic LIKE ?
+                    )
+                ))"""
+            )
+            token = f"%{normalize_persian(query)}%"
+            params.extend([token] * 10)
+        _append_message_window(where, params, date_from, date_to)
+        clause = " AND ".join(where)
+        total_row = await self._fetchone(
+            f"SELECT COUNT(*) AS c FROM messages m WHERE {clause}", params
+        )
+        rows = await self._fetchall(
+            f"""
+            SELECT m.id FROM messages m
+            WHERE {clause}
+            ORDER BY COALESCE(m.published_at,m.received_at) DESC, m.id DESC
+            LIMIT ?
+            """,
+            [*params, max(1, min(int(limit), 20000))],
+        )
+        return {
+            "total": int((total_row or {}).get("c") or 0),
+            "ids": [int(row["id"]) for row in rows],
+        }
+
     def _analyzed_message_sql(self) -> str:
-        return """(m.ai_enrichment_status='validated' OR EXISTS (
+        # IFNULL is required: SQLite treats ``NULL = 'validated'`` as NULL, so
+        # ``NOT (status='validated' OR EXISTS(...))`` drops unanalyzed rows
+        # instead of returning their ids.
+        return """(IFNULL(m.ai_enrichment_status,'')='validated' OR EXISTS (
+                    SELECT 1 FROM message_speaker_tags analyzed
+                    WHERE analyzed.message_id=m.id
+                ))"""
+
+    def _unanalyzed_message_sql(self) -> str:
+        return """(IFNULL(m.ai_enrichment_status,'') NOT IN ('validated','duplicate')
+                    AND IFNULL(m.duplicate_of,0)=0
+                    AND NOT EXISTS (
                     SELECT 1 FROM message_speaker_tags analyzed
                     WHERE analyzed.message_id=m.id
                 ))"""
@@ -2818,6 +3740,7 @@ class Database:
         _append_message_window(where, params, date_from, date_to)
         clause = " AND ".join(where)
         analyzed_sql = self._analyzed_message_sql()
+        unanalyzed_sql = self._unanalyzed_message_sql()
         total_row = await self._fetchone(
             f"SELECT COUNT(*) AS c FROM messages m WHERE {clause}", params
         )
@@ -2825,15 +3748,19 @@ class Database:
             f"SELECT COUNT(*) AS c FROM messages m WHERE {clause} AND {analyzed_sql}",
             params,
         )
+        remaining_row = await self._fetchone(
+            f"SELECT COUNT(*) AS c FROM messages m WHERE {clause} AND {unanalyzed_sql}",
+            params,
+        )
         total = int((total_row or {}).get("c") or 0)
         analyzed = int((analyzed_row or {}).get("c") or 0)
-        remaining = max(0, total - analyzed)
+        remaining = int((remaining_row or {}).get("c") or 0)
         remaining_ids = await self._fetchall(
             f"""
             SELECT m.id FROM messages m
-            WHERE {clause} AND NOT {analyzed_sql}
+            WHERE {clause} AND {unanalyzed_sql}
             ORDER BY COALESCE(m.published_at,m.received_at) DESC, m.id DESC
-            LIMIT 5000
+            LIMIT 20000
             """,
             params,
         )
@@ -2867,6 +3794,7 @@ class Database:
         await self._attach_automatic_editorial_ratings([item])
         _attach_flow_timestamp(item, "published_at", "received_at", "created_at")
         await self.attach_sender_profile_displays([item])
+        attach_public_message_media([item])
         return item
 
     async def replace_message_speaker_tags(
@@ -2933,8 +3861,6 @@ class Database:
             person = None
             if preset_person_id not in (None, "", 0, "0"):
                 person = await self.get_person(int(preset_person_id))
-            if person is None and name != "نامشخص":
-                person = await self.find_unique_person(name)
             normalized.append(
                 {
                     "name": name[:240],
@@ -4277,6 +5203,19 @@ class Database:
                 attention_subject_days.setdefault(subject, Counter())[day_key] += 1
 
         word_trends = ranked(word_counts, word_days, 24)
+        daily_word_totals: Counter[str] = Counter()
+        for buckets in word_days.values():
+            daily_word_totals.update(buckets)
+        people_by_name = {
+            normalize_persian(str(row.get("full_name") or "")).strip(): int(row["person_id"])
+            for row in await self._fetchall(
+                "SELECT person_id,full_name FROM people WHERE merged_into IS NULL"
+            )
+            if str(row.get("full_name") or "").strip()
+        }
+        speaker_trends = ranked(speaker_counts, speaker_days, 10)
+        for item in speaker_trends:
+            item["person_id"] = people_by_name.get(item["name"])
 
         return {
             "range": {
@@ -4292,6 +5231,10 @@ class Database:
             ],
             "word_cloud": ranked_word_cloud(word_counts, limit=42),
             "word_trends": word_trends,
+            "daily_word_totals": [
+                {"date": day, "count": int(daily_word_totals[day])}
+                for day in active_days
+            ],
             "topic_chart": {
                 "days": active_days,
                 "series": [
@@ -4309,7 +5252,7 @@ class Database:
                 "window_days": (end_day - start_day).days + 1,
                 "timezone": "Asia/Tehran",
             },
-            "speaker_trends": ranked(speaker_counts, speaker_days, 10),
+            "speaker_trends": speaker_trends,
             "high_attention": {
                 "subjects": ranked(
                     attention_subject_counts, attention_subject_days, 10
@@ -5600,6 +6543,95 @@ class Database:
         )
         return await self.get_editorial_automation_state()
 
+    async def messages_for_duplicate_compare(
+        self, message_ids: list[int]
+    ) -> list[dict[str, Any]]:
+        ids = [int(value) for value in message_ids if int(value) > 0]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        rows = await self._fetchall(
+            f"""
+            SELECT id,text,caption,text_sha256,published_at,received_at,created_at,
+                   duplicate_of,ai_enrichment_status
+            FROM messages WHERE id IN ({placeholders})
+            """,
+            ids,
+        )
+        order = {message_id: index for index, message_id in enumerate(ids)}
+        rows.sort(key=lambda row: order.get(int(row["id"]), 0))
+        return rows
+
+    async def recent_message_bodies_for_duplicate_compare(
+        self,
+        *,
+        exclude_ids: Sequence[int] = (),
+        days: int = 7,
+        limit: int = 800,
+    ) -> list[dict[str, Any]]:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, days))).isoformat()
+        excluded = [int(value) for value in exclude_ids if int(value) > 0]
+        where = [
+            "COALESCE(published_at,received_at,created_at)>=?",
+            "(TRIM(COALESCE(text,''))<>'' OR TRIM(COALESCE(caption,''))<>'')",
+        ]
+        params: list[Any] = [cutoff]
+        if excluded:
+            where.append(
+                "id NOT IN (" + ",".join("?" for _ in excluded) + ")"
+            )
+            params.extend(excluded)
+        params.append(max(1, min(int(limit), 4000)))
+        return await self._fetchall(
+            f"""
+            SELECT id,text,caption,text_sha256,published_at,received_at,created_at,duplicate_of,
+                   ai_enrichment_status
+            FROM messages
+            WHERE {' AND '.join(where)}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            params,
+        )
+
+    async def mark_messages_duplicate(self, duplicate_of: dict[int, int]) -> None:
+        now = utc_now()
+        conn = await self._connect()
+        try:
+            for message_id, representative_id in duplicate_of.items():
+                if int(message_id) == int(representative_id):
+                    continue
+                await conn.execute(
+                    """
+                    UPDATE messages
+                    SET duplicate_of=?,ai_enrichment_status='duplicate',updated_at=?
+                    WHERE id=?
+                    """,
+                    (int(representative_id), now, int(message_id)),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+    async def collapse_incoming_duplicate(self, message_id: int) -> int | None:
+        row = await self.get_message(message_id)
+        if not row or row.get("duplicate_of"):
+            return None
+        body = message_body(row)
+        if not body:
+            return None
+        recent = await self.recent_message_bodies_for_duplicate_compare(
+            exclude_ids=[message_id],
+            days=7,
+            limit=800,
+        )
+        for other in recent:
+            if is_near_duplicate(body, message_body(other)):
+                representative = int(other.get("duplicate_of") or other["id"])
+                await self.mark_messages_duplicate({int(message_id): representative})
+                return representative
+        return None
+
     async def list_unanalyzed_message_ids(
         self, *, limit: int = 100, start_at: str | None = None
     ) -> list[int]:
@@ -5607,6 +6639,8 @@ class Database:
             "status <> 'rejected'",
             "(TRIM(COALESCE(text,''))<>'' OR TRIM(COALESCE(caption,''))<>'')",
             "(analysis_content_type IS NULL OR TRIM(analysis_content_type)='')",
+            "IFNULL(duplicate_of,0)=0",
+            "IFNULL(ai_enrichment_status,'') NOT IN ('validated','duplicate')",
         ]
         params: list[Any] = []
         if start_at:
@@ -6115,11 +7149,11 @@ class Database:
                       run_id,person_id,person_candidate_id,person_name,position,category,registry_bucket,
                       topic_id,topic_name,main_subject,statement_type,statement_location_type,statement_location_label,
                       summary,summary_detailed,edited_summary,detail,editorial_category,editorial_source_url,editorial_qr_code_path,
-                      summary_method,summary_version,status,
+                      footnote,summary_method,summary_version,status,
                       confidence,confidence_breakdown_json,consensus_method,selected_sentences_json,
                       pipeline_versions_json,importance_score,include_in_main,include_in_appendix,
                       editorial_order,review_reason,issue_tags_json,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         run_id,
@@ -6142,6 +7176,7 @@ class Database:
                         item.get("editorial_category"),
                         item.get("editorial_source_url"),
                         item.get("editorial_qr_code_path"),
+                        item.get("footnote"),
                         item.get("summary_method") or "extractive",
                         item.get("summary_version") or "v11.0",
                         item.get("status") or "review_pending",
@@ -7341,6 +8376,7 @@ class Database:
             "category_name": draft.get("category_name") or (person or {}).get("category"),
             "oration_location": draft.get("oration_location"),
             "source_url": draft.get("source_url"),
+            "footnote": draft.get("footnote"),
             "finalized_at": draft.get("finalized_at"),
             "event": draft["event"],
             "analysis_topics": analysis_topics,
@@ -7367,6 +8403,7 @@ class Database:
         main_subject: str | None = None,
         oration_location: str | None = None,
         source_url: str | None = None,
+        footnote: str | None = None,
         expected_version: int,
         change_reason: str,
         actor: str,
@@ -7397,7 +8434,7 @@ class Database:
                 UPDATE editorial_drafts SET title=COALESCE(?,title),base_text=?,summary_paragraph=?,summary_sentence=?,
                 summary_title=?,detail=?,category_name=COALESCE(?,category_name),person_id=COALESCE(?,person_id),person_name=COALESCE(?,person_name),
                 topic_id=COALESCE(?,topic_id),topic_name=COALESCE(?,topic_name),main_subject=COALESCE(?,main_subject),
-                oration_location=COALESCE(?,oration_location),source_url=COALESCE(?,source_url),
+                oration_location=COALESCE(?,oration_location),source_url=COALESCE(?,source_url),footnote=?,
                 current_version=?,status='draft',updated_at=? WHERE draft_id=? AND current_version=? AND status='draft'
                 """,
                 (
@@ -7415,6 +8452,7 @@ class Database:
                     main_subject,
                     oration_location,
                     source_url,
+                    footnote,
                     version_no,
                     now,
                     draft_id,
@@ -7429,9 +8467,9 @@ class Database:
             await conn.execute(
                 """
                 INSERT INTO editorial_draft_versions(
-                  draft_id,version_no,base_text,summary_paragraph,summary_sentence,summary_title,category_name,topic_name,main_subject,detail,
+                  draft_id,version_no,base_text,summary_paragraph,summary_sentence,summary_title,category_name,topic_name,main_subject,detail,footnote,
                   change_reason,actor,created_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     draft_id,
@@ -7444,6 +8482,7 @@ class Database:
                     topic_name,
                     main_subject,
                     detail or summary_title,
+                    footnote,
                     change_reason,
                     actor,
                     now,
@@ -7479,6 +8518,7 @@ class Database:
             category_name=version.get("category_name"),
             topic_name=version.get("topic_name"),
             main_subject=version.get("main_subject"),
+            footnote=version.get("footnote"),
             expected_version=expected_version,
             change_reason=f"بازگشت به نسخه {version['version_no']}",
             actor=actor,
@@ -7868,11 +8908,11 @@ class Database:
                     # دستهٔ فهرست اشخاص فقط از شناسنامه می‌آید؛ رویدادها بخش
                     # پایانی مستقل «رویدادهای مهم ایران و جهان» هستند.
                     "category": (
-                        "رویدادهای مهم ایران و جهان"
+                        "وقایع و رویدادهای مهم ایران و جهان"
                         if is_event
-                        else ((person or {}).get("category") or draft.get("category_name") or "سایر افراد")
+                        else ((person or {}).get("category") or draft.get("category_name") or "سایر مسئولان و سیاسیون")
                     ),
-                    "editorial_category": draft.get("category_name") or (person or {}).get("category") or ("رویدادهای مهم ایران و جهان" if is_event else "سایر"),
+                    "editorial_category": draft.get("category_name") or (person or {}).get("category") or ("وقایع و رویدادهای مهم ایران و جهان" if is_event else "سایر مسئولان و سیاسیون"),
                     "registry_bucket": "inside" if draft.get("person_id") else "outside",
                     "topic_id": draft.get("topic_id"),
                     "topic_name": draft.get("topic_name") or "سایر",
@@ -7883,6 +8923,7 @@ class Database:
                     "summary_detailed": draft.get("summary_paragraph") or draft.get("base_text"),
                     "edited_summary": draft.get("summary_sentence") or draft.get("summary_paragraph"),
                     "detail": draft.get("detail") or draft.get("summary_title"),
+                    "footnote": draft.get("footnote"),
                     # QR is published only when this editorial-desk link and
                     # its generated QR file travel together into the run.
                     "editorial_source_url": draft.get("source_url"),

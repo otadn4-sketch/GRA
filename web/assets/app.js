@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   page: "overview", messages: [], selectedMessages: new Set(), sources: [],
-  people: [], personCategories: [], topics: [], drafts: [], currentDraft: null, draftFilter: "", draftOriginFilter: "", automation: null,
+  people: [], personCategories: [], topics: [], drafts: [], currentDraft: null, draftFilter: "", draftOriginFilter: "",
   bulletinDrafts: [], bulletinFinalizationDay: "", bulletinHighAttentionItems: [],
   highAttentionDay: "", highAttentionDrafts: [], highAttentionRuns: [], currentHighAttention: null,
   analysisFilters: {speakers: [], general_topics: [], specific_topics: [], events: []},
@@ -14,43 +14,88 @@ const state = {
   wordCloudResizeTimer: null, bulletinRuns: [], bulletinOutputPollTimer: null,
   botQueueRecoveryPollTimer: null,
   garayeWordTrendWord: "", personProfileId: null, calendar: {year: null, month: null, selectedDay: null, eventsByDay: new Map(), apiError: ""},
-  streamOffset: 0, streamTotal: 0,
+  streamOffset: 0, streamTotal: 0, streamPage: 1, streamPageSize: 20,
+  bulletinRunsPage: 1, bulletinRunsPageSize: 5,
   jalaliPicker: {input: null, year: null, month: null},
-  quickStart: {step: 1, dateFrom: "", dateTo: "", timeFrom: "00:00", timeTo: "23:59", analyzing: false},
+  deskSubjectConfirmed: false, deskIdentityOverride: null,
+  quickStart: {step: 1, dateFrom: "", dateTo: "", timeFrom: "00:00", timeTo: "23:59", analyzing: false, analysisDone: false, highAttentionDay: "", outputDay: ""},
+  garayeSpeakerFocus: "",
+  eitanAxes: [], eitanAxisId: "", eitanMessages: [], eitanPage: 1, eitanPageSize: 20, eitanTotal: 0, eitanCreating: false,
+  eitanInsights: null,
 };
 const pageMeta = {
-  overview: ["تقویم و مناسبت‌ها", "تقویم رسمی هجری شمسی و مناسبت‌های روز"],
-  stream: ["جریان اخبار", "جست‌وجو، بررسی و انتخاب پیام‌های دریافت‌شده"],
-  automation: ["خودکارسازی", "کنترل مستقل تحلیل هوشمند، کنترل انسانی و کرولر Selenium"],
-  finalization: ["نهایی‌سازی خبر", "تدوین متن پایه، خلاصه‌ها و مدیریت نسخه‌ها"],
-  monitoring: ["نظارت", "آمار ارسال‌کنندگان، روند روزانه و میانگین امتیاز خودکار پیام‌ها"],
-  garaye: ["گرایه", "نبض محتوای تحریریه: موضوع‌ها، واژه‌ها، گویندگان و پربازتاب‌ها"],
-  "high-attention": ["پربازتاب", "انتخاب خبرهای نهایی‌شده و تدوین محورهای پربازتاب"],
-  bulletins: ["خبرنامه‌ها", "چینش خبرهای نهایی و تولید خروجی‌های انتشار"],
+  overview: ["تقویم و مناسبت‌ها", ""],
+  stream: ["جریان اخبار", ""],
+  finalization: ["نهایی‌سازی خبر", ""],
+  monitoring: ["نظارت", ""],
+  garaye: ["گرایه", ""],
+  "eitan-gara": ["ایتان گرا", ""],
+  "high-attention": ["پربازتاب", ""],
+  bulletins: ["خبرنامه‌ها", ""],
   people: ["شناسنامه اشخاص", "مدیریت نام، سمت، دسته و کانال اشخاص"],
   "person-profile": ["پروفایل شخص", "مشخصات، کانال‌ها و خبرهای منتسب به یک شخص"],
-  sources: ["منابع پایش", "کانال‌های اشخاص و گروه‌های پشتیبانی"],
+  sources: ["منابع پایش", "کانال‌های پایش، گروه پشتیبانی و کرولر کانال‌های عمومی"],
   users: ["کاربران و دسترسی", "تعریف حساب، نقش و مجوزهای هر کاربر"],
+  "api-keys": ["کلیدهای API", "ساخت و ابطال کلید برای فراخوانی برنامه‌ای سامانه"],
   system: ["وضعیت سامانه", "سلامت اجزا، رویدادها، به‌روزرسانی زنده و پشتیبان‌گیری"],
   portal: ["پرتال کاربری", "نمایه، نقش، آمار ارسال و تنظیمات شخصی حساب شما"],
-  "quick-start": ["شروع سریع", "انجام مرحله‌ای تحلیل، نهایی‌سازی، پربازتاب و خروجی خبرنامه"],
+  "quick-start": ["شروع سریع", ""],
 };
 const fa = new Intl.NumberFormat("fa-IR");
+function renderPager(hostIds, {page, pageCount, total, pageSize, onSelect}) {
+  const bar = $(hostIds.bar);
+  const numbers = $(hostIds.numbers);
+  const hint = $(hostIds.hint);
+  const prev = $(hostIds.prev);
+  const next = $(hostIds.next);
+  if (!bar) return;
+  const count = Math.max(1, Number(pageCount) || 1);
+  const current = Math.min(Math.max(1, Number(page) || 1), count);
+  bar.classList.toggle("hidden", Number(total || 0) <= Number(pageSize || 0) && current <= 1);
+  if (hint) {
+    hint.textContent = Number(total || 0)
+      ? `${n((current - 1) * pageSize + 1)} تا ${n(Math.min(current * pageSize, total))} از ${n(total)}`
+      : "";
+  }
+  if (prev) prev.disabled = current <= 1;
+  if (next) next.disabled = current >= count;
+  if (numbers) {
+    const buttons = [];
+    const windowSize = 5;
+    let start = Math.max(1, current - 2);
+    let end = Math.min(count, start + windowSize - 1);
+    start = Math.max(1, end - windowSize + 1);
+    if (start > 1) buttons.push(1);
+    if (start > 2) buttons.push("…");
+    for (let value = start; value <= end; value += 1) buttons.push(value);
+    if (end < count - 1) buttons.push("…");
+    if (end < count) buttons.push(count);
+    numbers.innerHTML = buttons.map((value) => {
+      if (value === "…") return `<span class="pager-ellipsis">…</span>`;
+      return `<button type="button" class="pager-page${value === current ? " is-active" : ""}" data-page="${value}">${n(value)}</button>`;
+    }).join("");
+    numbers.querySelectorAll("[data-page]").forEach((button) => {
+      button.addEventListener("click", () => onSelect(Number(button.dataset.page)));
+    });
+  }
+  if (prev) prev.onclick = () => current > 1 && onSelect(current - 1);
+  if (next) next.onclick = () => current < count && onSelect(current + 1);
+}
 const dateFormat = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
-  weekday: "long", hour: "2-digit", minute: "2-digit",
+  weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23",
 });
 const dateOnlyFormat = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit", weekday: "long",
 });
 const timeOnlyFormat = new Intl.DateTimeFormat("fa-IR", {
-  timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23",
 });
 const jalaliInputDateFormat = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
   timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
 });
 const timeInputFormat = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23",
 });
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -204,7 +249,7 @@ const jalaliValueToFlowDate = (value) => {
   const gregorian = d2g(j2d(parts.year, parts.month, parts.day));
   return `${gregorian.gy}-${String(gregorian.gm).padStart(2, "0")}-${String(gregorian.gd).padStart(2, "0")}`;
 };
-const latinDigits = (value) => String(value ?? "").replace(/[۰-۹]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹".indexOf(digit));
+const latinDigits = (value) => String(value ?? "").replace(/[۰-۹٠-٩]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩".indexOf(digit) % 10);
 
 function closeJalaliPicker() {
   const picker = $("jalaliPicker");
@@ -272,6 +317,112 @@ function bindJalaliDatePickers() {
   });
 }
 
+function clock24(value) {
+  let text = latinDigits(String(value || "")).trim().toLowerCase().replace(/[٫]/g, ":");
+  if (!text) return "";
+  const isPm = /p\.?\s*m\.?|ب\.?\s*ظ|بعدازظهر|بعد از ظهر/.test(text);
+  const isAm = /a\.?\s*m\.?|ق\.?\s*ظ|قبل‌?ازظهر|قبل از ظهر/.test(text);
+  text = text.replace(/a\.?\s*m\.?|p\.?\s*m\.?|ق\.?\s*ظ\.?|ب\.?\s*ظ\.?|قبل‌?ازظهر|بعدازظهر|قبل از ظهر|بعد از ظهر/g, "").trim();
+  text = text.replace(/[.\-]/g, ":").replace(/\s+/g, "");
+  const match = text.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
+  if (!match) return "";
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (isPm && hour < 12) hour += 12;
+  if (isAm && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function jalaliWindowParams(dateFromId, timeFromId, dateToId, timeToId) {
+  const params = new URLSearchParams();
+  const dateFrom = $(dateFromId)?.value.trim() || "";
+  const dateTo = $(dateToId)?.value.trim() || dateFrom;
+  const timeFrom = clock24($(timeFromId)?.value || "");
+  const timeTo = clock24($(timeToId)?.value || "");
+  if (dateFrom) params.set("date_from_jalali", dateFrom);
+  if (dateTo) params.set("date_to_jalali", dateTo);
+  if (timeFrom) params.set("time_from", timeFrom);
+  if (timeTo) params.set("time_to", timeTo);
+  params.set("timezone", "Asia/Tehran");
+  return params;
+}
+
+function bindTime24Pickers() {
+  const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  document.querySelectorAll('input[type="time"]').forEach((input) => {
+    if (input.dataset.time24Bound === "1") return;
+    input.dataset.time24Bound = "1";
+    const wrap = document.createElement("div");
+    wrap.className = "time24";
+    wrap.setAttribute("dir", "ltr");
+    const hour = document.createElement("select");
+    hour.className = "time24-hour";
+    hour.setAttribute("aria-label", "ساعت");
+    const minute = document.createElement("select");
+    minute.className = "time24-minute";
+    minute.setAttribute("aria-label", "دقیقه");
+    const sep = document.createElement("span");
+    sep.className = "time24-sep";
+    sep.textContent = ":";
+    const optional = !input.required && !input.value;
+    if (optional) {
+      hour.appendChild(new Option("ساعت", ""));
+      minute.appendChild(new Option("دقیقه", ""));
+    }
+    for (let h = 0; h < 24; h += 1) {
+      const value = String(h).padStart(2, "0");
+      hour.appendChild(new Option(value, value));
+    }
+    for (let m = 0; m < 60; m += 1) {
+      const value = String(m).padStart(2, "0");
+      minute.appendChild(new Option(value, value));
+    }
+    input.classList.add("time24-native");
+    input.setAttribute("step", "60");
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(hour);
+    wrap.appendChild(sep);
+    wrap.appendChild(minute);
+    wrap.appendChild(input);
+    const syncFromInput = () => {
+      const parsed = clock24(input.value);
+      if (!parsed) {
+        hour.value = optional ? "" : "00";
+        minute.value = optional ? "" : "00";
+        return;
+      }
+      const [hh, mm] = parsed.split(":");
+      hour.value = hh;
+      minute.value = mm;
+    };
+    const syncToInput = () => {
+      if (!hour.value && !minute.value) {
+        proto.set.call(input, "");
+      } else {
+        proto.set.call(input, `${hour.value || "00"}:${minute.value || "00"}`);
+      }
+      input.dispatchEvent(new Event("change", {bubbles: true}));
+      input.dispatchEvent(new Event("input", {bubbles: true}));
+    };
+    hour.addEventListener("change", syncToInput);
+    minute.addEventListener("change", syncToInput);
+    input.addEventListener("change", syncFromInput);
+    input.addEventListener("input", syncFromInput);
+    if (proto) {
+      Object.defineProperty(input, "value", {
+        configurable: true,
+        get() { return proto.get.call(this); },
+        set(next) {
+          proto.set.call(this, next);
+          syncFromInput();
+        },
+      });
+    }
+    syncFromInput();
+  });
+}
+
 function calendarEventsFrom(value) {
   const source = Array.isArray(value) ? value : (value == null || value === "" ? [] : [value]);
   return source.map((entry) => {
@@ -315,7 +466,7 @@ function renderCalendarEvents() {
   if (record.holiday && !events.some((event) => /تعطیل/.test(event))) events.unshift("تعطیل رسمی");
   $("calendarEvents").innerHTML = events.length
     ? `<ul>${events.map((event) => `<li>${esc(event)}</li>`).join("")}</ul>`
-    : `<div class="empty-mini">مناسبتی برای این روز در API ثبت نشده است.</div>`;
+    : "";
 }
 function renderCalendar() {
   const {year, month, selectedDay, eventsByDay} = state.calendar;
@@ -485,10 +636,11 @@ function toast(message, isError = false) {
 }
 
 function showPage(page, section = "") {
+  if (page === "automation") return showPage("sources", section);
+  const leavingQuickStart = state.page === "quick-start" && page !== "quick-start";
   if (page === "finalization") {
     state.finalizationView = section === "drafts" ? "drafts" : "workbench";
     section = state.finalizationView;
-    renderFinalizationView();
   }
   if (page === "person-profile") {
     const personId = Number(section);
@@ -500,6 +652,8 @@ function showPage(page, section = "") {
   }
   state.page = page;
   state.pageSection = section;
+  if (leavingQuickStart) unmountQuickStartDesk();
+  if (page === "finalization") renderFinalizationView();
   document.querySelectorAll(".page").forEach((element) => element.classList.toggle("active", element.id === `page-${page}`));
   document.querySelectorAll(".nav-item, .quick-start-nav").forEach((element) => element.classList.toggle(
     "active", (element.dataset.page === page || (page === "person-profile" && element.dataset.page === "people") || (page === "portal" && element.dataset.page === "portal"))
@@ -512,10 +666,30 @@ function showPage(page, section = "") {
   });
   const [title, subtitle] = pageMeta[page] || pageMeta.overview;
   $("pageTitle").textContent = title;
-  $("pageSubtitle").textContent = subtitle;
-  $("sidebar").classList.remove("open");
+  $("pageSubtitle").textContent = subtitle || "";
+  $("pageSubtitle").hidden = !subtitle;
+  closeMobileNav();
   history.replaceState(null, "", `#${page}${section ? `:${section}` : ""}`);
   loadPage(page).catch((error) => toast(error.message, true));
+}
+
+function closeMobileNav() {
+  $("sidebar")?.classList.remove("open");
+  const backdrop = $("navBackdrop");
+  if (backdrop) backdrop.hidden = true;
+  document.body.classList.remove("nav-open");
+}
+
+function openMobileNav() {
+  $("sidebar")?.classList.add("open");
+  const backdrop = $("navBackdrop");
+  if (backdrop) backdrop.hidden = false;
+  document.body.classList.add("nav-open");
+}
+
+function toggleMobileNav() {
+  if ($("sidebar")?.classList.contains("open")) closeMobileNav();
+  else openMobileNav();
 }
 
 function closeNavigationMenus() {
@@ -528,16 +702,17 @@ function closeNavigationMenus() {
 async function loadPage(page) {
   if (page === "overview") return loadCalendar();
   if (page === "stream") return loadStream();
-  if (page === "automation") return loadAutomationWorkspace();
   if (page === "finalization") return loadFinalizationWorkspace();
   if (page === "monitoring") return loadMonitoring();
   if (page === "garaye") return loadGarayeInsights();
+  if (page === "eitan-gara") return loadEitanGaraPage();
   if (page === "high-attention") return loadHighAttentionWorkspace();
   if (page === "bulletins") return loadBulletinWorkspace();
   if (page === "people") return loadPeople();
   if (page === "person-profile") return loadPersonProfile();
   if (page === "sources") return loadSources();
   if (page === "users") return loadAdminUsers();
+  if (page === "api-keys") return loadApiKeys();
   if (page === "system") return loadSystem();
   if (page === "portal") return loadUserPortal();
   if (page === "quick-start") return loadQuickStart();
@@ -545,7 +720,7 @@ async function loadPage(page) {
 
 async function loadCurrentUser() {
   state.me = await api("/admin/api/me");
-  $("currentUser").textContent = `${state.me.full_name} · ${state.me.role_title}`;
+  $("currentUser").textContent = "پرتال کاربری";
   if ($("sidebarVersion") && state.me.version) $("sidebarVersion").textContent = faDigits(state.me.version);
   document.querySelectorAll("[data-permission]").forEach((element) => {
     const permissions = state.me.permissions || [];
@@ -573,11 +748,6 @@ async function loadGarayeOverviewStats() {
     ["تحلیل‌شده", counts.analyzed, "✦", "green"],
     ["منابع فعال", counts.active_sources, "⌁", "red"],
   ].map(([label, value, icon, tone]) => `<article class="metric-card"><span class="metric-icon ${tone}">${icon}</span><div><b>${n(value)}</b><small>${label}</small></div></article>`).join("");
-  const total = Math.max(1, Number(counts.total || 0));
-  const analyzed = Number(counts.analyzed || 0) / total * 100;
-  const pending = Number(counts.pending || 0) / total * 100;
-  $("statusDonut").innerHTML = `<div class="donut" style="background:conic-gradient(#4F46E5 0 ${analyzed}%,#F59E0B ${analyzed}% ${analyzed + pending}%,#94A3B8 ${analyzed + pending}% 100%)"><div class="donut-center"><b>${n(counts.total)}</b><small>پیام</small></div></div>`;
-  $("sourceSummary").innerHTML = (stats.by_source || []).slice(0, 4).map((item) => `<div class="source-row"><span>${esc(item.source_name || "نامشخص")}</span><b>${n(item.total)}</b></div>`).join("") || `<div class="empty-mini">منبعی ثبت نشده است.</div>`;
   return stats;
 }
 
@@ -619,7 +789,8 @@ function renderMonitoringChart(data, focusDay = null) {
   const activeDays = (data.daily_totals || []).filter((item) => Number(item.count || 0) > 0);
   if (!focusDay) {
     $("monitoringChartTitle").textContent = "روند پیام‌های دریافتی";
-    $("monitoringChartSubtitle").textContent = "روزهای دارای پیام، از راست به چپ نمایش داده می‌شوند؛ برای دیدن سهم ارسال‌کنندگان همان روز، روی ستون آن کلیک کنید.";
+    $("monitoringChartSubtitle").textContent = "";
+    $("monitoringChartSubtitle").hidden = true;
     reset.classList.add("hidden");
     const max = Math.max(1, ...activeDays.map((item) => Number(item.count || 0)));
     chart.className = "monitoring-daily-chart";
@@ -634,7 +805,8 @@ function renderMonitoringChart(data, focusDay = null) {
     ...item, count: Number((item.daily || {})[focusDay] || 0),
   })).filter((item) => item.count > 0).sort((a, b) => b.count - a.count);
   $("monitoringChartTitle").textContent = `سهم ارسال‌کنندگان در ${monitoringDayLabel(focusDay)}`;
-  $("monitoringChartSubtitle").textContent = "سهم هر ارسال‌کننده از کل پیام‌های همان روز؛ برای بازگشت، دکمهٔ کنار عنوان را بزنید.";
+  $("monitoringChartSubtitle").textContent = "";
+  $("monitoringChartSubtitle").hidden = true;
   reset.classList.remove("hidden");
   chart.className = "monitoring-daily-chart monitoring-share-chart";
   const palette = ["#008080", "#4f46e5", "#c27500", "#8a4a2c", "#0f766e", "#7c3f8d", "#475569"];
@@ -657,12 +829,146 @@ function garayeDateLabel(value) {
 
 function renderGarayeBars(targetId, rows, emptyText) {
   const target = $(targetId);
+  if (!target) return;
   const values = rows || [];
   const max = Math.max(1, ...values.map((item) => Number(item.count || 0)));
   target.innerHTML = values.length ? values.map((item) => {
     const width = Math.max(6, Math.round(Number(item.count || 0) / max * 100));
     return `<article class="garaye-rank-row"><b title="${esc(item.name || item.date || "")}">${esc(item.name || garayeDateLabel(item.date))}</b><span class="garaye-rank-track"><i style="width:${width}%"></i></span><small>${n(item.count)}</small></article>`;
   }).join("") : `<div class="empty-mini">${esc(emptyText)}</div>`;
+}
+
+const GARAYE_LINE_PALETTE = ["#007c7c", "#4f46e5", "#c27500", "#0f766e", "#db2777", "#0284c7", "#65a30d", "#7c3aed", "#8a4a2c", "#475569"];
+
+function garayeShortDate(value) {
+  const date = new Date(`${value}T12:00:00+03:30`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+      timeZone: "Asia/Tehran", month: "2-digit", day: "2-digit",
+    }).format(date);
+}
+
+function catmullRomPath(points) {
+  if (!points.length) return "";
+  if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`;
+  let path = `M ${points[0][0]} ${points[0][1]}`;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const p0 = points[Math.max(0, index - 1)];
+    const p1 = points[index];
+    const p2 = points[index + 1];
+    const p3 = points[Math.min(points.length - 1, index + 2)];
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    path += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${p2[0]} ${p2[1]}`;
+  }
+  return path;
+}
+
+function alignSeriesToDays(rows, days) {
+  return (rows || []).map((item) => {
+    const byDate = new Map((item.series || []).map((row) => [row.date, Number(row.count || 0)]));
+    return {
+      name: item.name,
+      total: Number(item.count || 0),
+      values: days.map((day) => byDate.get(day) || 0),
+      person_id: item.person_id || null,
+    };
+  });
+}
+
+function renderCurvedTrendChart(targetId, legendId, {days, series, emptyText, ariaLabel, focusName = "", onSelect = null}) {
+  const target = $(targetId);
+  const legend = $(legendId);
+  if (!target) return;
+  if (!days.length || !series.length) {
+    target.innerHTML = `<div class="trend-empty"><b>${esc(emptyText)}</b></div>`;
+    if (legend) legend.innerHTML = "";
+    return;
+  }
+  const width = 1000;
+  const height = 320;
+  const pad = {top: 22, right: 28, bottom: 54, left: 54};
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const maxValue = Math.max(1, ...series.flatMap((item) => (item.values || []).map(Number)));
+  const yMax = maxValue <= 4 ? Math.max(2, maxValue) : Math.ceil(maxValue / 4) * 4;
+  const gridSteps = Math.min(4, yMax);
+  const xAt = (index) => pad.left + (days.length === 1 ? plotWidth / 2 : index * plotWidth / (days.length - 1));
+  const yAt = (value) => pad.top + plotHeight - Math.min(yMax, Number(value || 0)) * plotHeight / yMax;
+  const focused = Boolean(focusName);
+  const grid = Array.from({length: gridSteps + 1}, (_, index) => {
+    const value = yMax * index / gridSteps;
+    const y = yAt(value);
+    return `<g><line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" class="trend-grid-line"/><text x="${pad.left - 12}" y="${y + 5}" class="trend-axis-label">${n(value)}</text></g>`;
+  }).join("");
+  const labelEvery = days.length > 10 ? 2 : 1;
+  const xLabels = days.map((day, index) => (
+    index % labelEvery === 0 || index === days.length - 1
+      ? `<text x="${xAt(index)}" y="${height - 18}" class="trend-axis-label trend-date-label">${esc(garayeShortDate(day))}</text>`
+      : ""
+  )).join("");
+  const lines = series.map((item, seriesIndex) => {
+    const color = GARAYE_LINE_PALETTE[seriesIndex % GARAYE_LINE_PALETTE.length];
+    const values = days.map((_, index) => Number((item.values || [])[index] || 0));
+    const points = values.map((value, index) => [xAt(index), yAt(value)]);
+    const dim = focused && item.name !== focusName;
+    const strong = focused && item.name === focusName;
+    const strokeWidth = strong ? 4.2 : (dim ? 2.2 : 2.8);
+    const opacity = dim ? "0.16" : "1";
+    const dots = values.map((value, index) => `
+      <circle cx="${xAt(index)}" cy="${yAt(value)}" r="${value ? (strong ? 5 : 3.8) : 2.2}" fill="${color}">
+        <title>${esc(item.name)} · ${esc(garayeShortDate(days[index]))}: ${n(value)}</title>
+      </circle>`).join("");
+    return `<g class="trend-series" data-series-name="${esc(item.name)}" opacity="${opacity}">
+      <path d="${catmullRomPath(points)}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${catmullRomPath(points)}" fill="none" stroke="transparent" stroke-width="14"/>
+      ${dots}
+    </g>`;
+  }).join("");
+  target.innerHTML = `
+    <svg class="trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(ariaLabel || "نمودار منحنی")}">
+      ${grid}${xLabels}${lines}
+    </svg>`;
+  if (onSelect) {
+    target.querySelector("svg")?.addEventListener("click", () => onSelect(""));
+    target.querySelectorAll("[data-series-name]").forEach((group) => {
+      group.addEventListener("click", (event) => {
+        event.stopPropagation();
+        onSelect(group.getAttribute("data-series-name") || "");
+      });
+    });
+  }
+  if (legend) {
+    legend.innerHTML = series.map((item, index) => {
+      const dim = focused && item.name !== focusName;
+      const strong = focused && item.name === focusName;
+      return `
+      <span class="trend-key${strong ? " is-focused" : ""}${dim ? " is-dimmed" : ""}" data-series-name="${esc(item.name)}">
+        <i class="trend-swatch" style="background:${GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length]}"></i>
+        <b>${esc(item.name)}</b>
+        <small>${n(item.total)}</small>
+      </span>`;
+    }).join("");
+    if (onSelect) {
+      legend.querySelectorAll("[data-series-name]").forEach((key) => {
+        key.addEventListener("click", (event) => {
+          event.stopPropagation();
+          onSelect(key.getAttribute("data-series-name") || "");
+        });
+      });
+    }
+  }
+}
+
+function findPersonBySpeakerName(name) {
+  const key = String(name || "").trim();
+  if (!key) return null;
+  return (state.people || []).find((item) => item.full_name === key)
+    || (state.people || []).find((item) => String(item.aliases || "").split("|").map((part) => part.trim()).includes(key))
+    || null;
 }
 
 function renderGarayeWordCloud(words = state.garayeInsights?.word_cloud || []) {
@@ -687,7 +993,7 @@ function renderGarayeWordCloud(words = state.garayeInsights?.word_cloud || []) {
   target.innerHTML = layout.map((item, index) => {
     const tone = index % 6;
     const strength = item.central ? 760 : Math.max(500, Math.round(470 + (item.fontSize / 44) * 210));
-    return `<button class="garaye-word word-tone-${tone}${item.central ? " central" : ""}" type="button" data-word-index="${index}" style="left:${item.x}px;top:${item.y}px;--word-size:${item.fontSize}px;--word-weight:${strength}" title="${n(item.count)} بار تکرار" aria-label="${esc(item.word)}؛ ${n(item.count)} بار تکرار. برای نمایش روند روزانه کلیک کنید.">${esc(item.word)}</button>`;
+    return `<button class="garaye-word word-tone-${tone}${item.central ? " central" : ""}${item.word === state.garayeWordTrendWord ? " is-selected" : ""}" type="button" data-word="${esc(item.word)}" data-word-index="${index}" style="left:${item.x}px;top:${item.y}px;--word-size:${item.fontSize}px;--word-weight:${strength}" title="${n(item.count)} بار تکرار" aria-label="${esc(item.word)}؛ ${n(item.count)} بار تکرار. برای نمایش روند روزانه کلیک کنید.">${esc(item.word)}</button>`;
   }).join("");
   target.querySelectorAll(".garaye-word").forEach((button) => {
     button.addEventListener("click", () => {
@@ -696,7 +1002,7 @@ function renderGarayeWordCloud(words = state.garayeInsights?.word_cloud || []) {
       state.garayeWordTrendWord = item.word;
       $("garayeWordTrendSelect").value = item.word;
       renderGarayeWordTrend();
-      $("garayeWordTrend").scrollIntoView({behavior: "smooth", block: "center"});
+      $("garayeWordTreemap")?.scrollIntoView({behavior: "smooth", block: "center"});
     });
   });
 }
@@ -719,33 +1025,177 @@ async function loadGarayeInsights() {
   if ($("garayeTo").value.trim()) params.set("date_to_jalali", $("garayeTo").value.trim());
   if ($("garayeFromTime").value) params.set("time_from", $("garayeFromTime").value);
   if ($("garayeToTime").value) params.set("time_to", $("garayeToTime").value);
+  if (!state.people.length) {
+    try { state.people = await api("/admin/api/people"); } catch (_) {}
+  }
   const [data] = await Promise.all([
     api(`/admin/api/garaye-insights?${params}`),
     loadGarayeOverviewStats(),
   ]);
   state.garayeInsights = data;
-  const range = data.range || {};
+  state.garayeSpeakerFocus = "";
   renderTopicTrend(data.topic_chart || {});
   renderGarayeWordCloud(data.word_cloud || []);
   observeGarayeWordCloud();
-  renderGarayeBars("garayeSpeakerTrends", data.speaker_trends, "هنوز گویندهٔ مشخصی در این بازه نیست.");
-  renderGarayeBars("garayeAttentionTrend", data.high_attention?.subjects || [], "سوژهٔ اصلیِ پربازتاب نهایی‌شده‌ای در این بازه نیست.");
+  renderGarayeSpeakerTrends();
   const trendWords = data.word_trends || [];
   const selected = trendWords.some((item) => item.name === state.garayeWordTrendWord)
     ? state.garayeWordTrendWord
-    : (trendWords[0]?.name || "");
+    : "";
   state.garayeWordTrendWord = selected;
   $("garayeWordTrendSelect").innerHTML = trendWords.length
-    ? trendWords.map((item) => `<option value="${esc(item.name)}" ${item.name === selected ? "selected" : ""}>${esc(item.name)} · ${n(item.count)}</option>`).join("")
+    ? `<option value="">همه واژه‌ها</option>` + trendWords.map((item) => `<option value="${esc(item.name)}" ${item.name === selected ? "selected" : ""}>${esc(item.name)} · ${n(item.count)}</option>`).join("")
     : '<option value="">واژه‌ای موجود نیست</option>';
   renderGarayeWordTrend();
 }
 
+function layoutTreemap(items, width, height) {
+  const nodes = (items || [])
+    .map((item) => ({name: item.name, value: Math.max(Number(item.value || 0), 0)}))
+    .filter((item) => item.value > 0 && item.name)
+    .sort((a, b) => b.value - a.value);
+  const out = [];
+  const split = (list, x, y, w, h) => {
+    if (!list.length || w < 0.5 || h < 0.5) return;
+    if (list.length === 1) {
+      out.push({...list[0], x, y, w, h});
+      return;
+    }
+    const sum = list.reduce((total, item) => total + item.value, 0) || 1;
+    const half = sum / 2;
+    let acc = 0;
+    let index = 0;
+    for (; index < list.length; index += 1) {
+      acc += list[index].value;
+      if (acc >= half) {
+        index += 1;
+        break;
+      }
+    }
+    if (index <= 0) index = 1;
+    if (index >= list.length) index = list.length - 1;
+    const first = list.slice(0, index);
+    const rest = list.slice(index);
+    const firstSum = first.reduce((total, item) => total + item.value, 0);
+    const ratio = Math.min(0.86, Math.max(0.14, firstSum / sum));
+    if (w >= h) {
+      split(first, x, y, w * ratio, h);
+      split(rest, x + w * ratio, y, w * (1 - ratio), h);
+    } else {
+      split(first, x, y, w, h * ratio);
+      split(rest, x, y + h * ratio, w, h * (1 - ratio));
+    }
+  };
+  split(nodes, 0, 0, width, height);
+  return out;
+}
+
+function garayeTreemapItems() {
+  const cloud = state.garayeInsights?.word_cloud || [];
+  if (cloud.length) {
+    return cloud.slice(0, 20).map((item) => ({name: item.word || item.name, value: Number(item.count || 0)}));
+  }
+  return (state.garayeInsights?.word_trends || []).slice(0, 20).map((item) => ({
+    name: item.name,
+    value: Number(item.count || 0),
+  }));
+}
+
+function renderGarayeWordTreemap() {
+  const host = $("garayeWordTreemap");
+  if (!host) return;
+  const items = garayeTreemapItems();
+  if (!items.length) {
+    host.innerHTML = `<div class="garaye-treemap-empty">واژه‌ای برای نقشهٔ مستطیلی در این بازه نیست.</div>`;
+    return;
+  }
+  const width = 1000;
+  const height = 620;
+  const maxValue = Math.max(1, ...items.map((item) => Number(item.value || 0)));
+  const selected = state.garayeWordTrendWord;
+  const cells = layoutTreemap(items, width, height);
+  host.innerHTML = cells.map((cell) => {
+    const share = Number(cell.value || 0) / maxValue;
+    const fill = `hsl(168 ${42 + share * 28}% ${86 - share * 48}%)`;
+    const ink = share > 0.45 ? "#f7fffe" : "#073c3d";
+    const focused = selected && cell.name === selected;
+    const dimmed = selected && cell.name !== selected;
+    const showLabel = cell.w > 78 && cell.h > 42;
+    const showCount = cell.w > 96 && cell.h > 62;
+    return `<button type="button" class="garaye-treemap-cell${focused ? " is-focused" : ""}${dimmed ? " is-dimmed" : ""}" data-word="${esc(cell.name)}" title="${esc(cell.name)} · ${n(cell.value)}" style="left:${(cell.x / width) * 100}%;top:${(cell.y / height) * 100}%;width:${(cell.w / width) * 100}%;height:${(cell.h / height) * 100}%;background:${fill};color:${ink}">${showLabel ? `<b>${esc(cell.name)}</b>${showCount ? `<small>${n(cell.value)}</small>` : ""}` : ""}</button>`;
+  }).join("");
+  host.querySelectorAll("[data-word]").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      const word = cell.getAttribute("data-word") || "";
+      state.garayeWordTrendWord = word;
+      if ($("garayeWordTrendSelect")) $("garayeWordTrendSelect").value = word;
+      renderGarayeWordTrend();
+    });
+  });
+}
+
+function setGarayeWordTrendFocus(name) {
+  const next = String(name || "").trim();
+  state.garayeWordTrendWord = state.garayeWordTrendWord === next ? "" : next;
+  if ($("garayeWordTrendSelect")) $("garayeWordTrendSelect").value = state.garayeWordTrendWord;
+  renderGarayeWordTrend();
+}
+
 function renderGarayeWordTrend() {
-  const target = $("garayeWordTrend");
-  const trend = (state.garayeInsights?.word_trends || []).find((item) => item.name === state.garayeWordTrendWord);
-  const rows = (trend?.series || []).map((item) => ({...item, name: garayeDateLabel(item.date)}));
-  renderGarayeBars(target.id, rows, "برای این واژه در بازهٔ انتخابی روندی ثبت نشده است.");
+  const data = state.garayeInsights || {};
+  const totals = data.daily_word_totals || [];
+  const chartDays = totals.length
+    ? totals.map((item) => item.date)
+    : [...new Set((data.word_trends || []).flatMap((item) => (item.series || []).map((row) => row.date)))].sort();
+  const series = alignSeriesToDays(data.word_trends || [], chartDays);
+  renderCurvedTrendChart("garayeWordTrendChart", "garayeWordTrendLegend", {
+    days: chartDays,
+    series,
+    emptyText: "برای این بازه روند ابرواژگان ثبت نشده است.",
+    ariaLabel: "نمودار منحنی روند روزانه ابرواژگان",
+    focusName: state.garayeWordTrendWord,
+    onSelect: setGarayeWordTrendFocus,
+  });
+  renderGarayeWordTreemap();
+  $("garayeWordCloud")?.querySelectorAll(".garaye-word").forEach((button) => {
+    button.classList.toggle("is-selected", button.getAttribute("data-word") === state.garayeWordTrendWord);
+  });
+}
+
+function setGarayeSpeakerFocus(name) {
+  const next = String(name || "").trim();
+  state.garayeSpeakerFocus = state.garayeSpeakerFocus === next ? "" : next;
+  renderGarayeSpeakerTrends();
+}
+
+function renderGarayeSpeakerTrends() {
+  const data = state.garayeInsights || {};
+  const days = (data.daily_finalized || []).map((item) => item.date);
+  const series = alignSeriesToDays(data.speaker_trends || [], days);
+  renderCurvedTrendChart("garayeSpeakerChart", "garayeSpeakerLegend", {
+    days,
+    series,
+    emptyText: "هنوز گویندهٔ مشخصی در این بازه نیست.",
+    ariaLabel: "نمودار منحنی ترند گویندگان",
+    focusName: state.garayeSpeakerFocus,
+    onSelect: setGarayeSpeakerFocus,
+  });
+  const box = $("garayeSpeakerPeople");
+  if (!box) return;
+  box.innerHTML = series.length ? series.map((item) => {
+    const person = item.person_id
+      ? (state.people || []).find((row) => Number(row.person_id) === Number(item.person_id))
+      : findPersonBySpeakerName(item.name);
+    const personId = person?.person_id || item.person_id;
+    const initials = String(item.name || "؟").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || "؟";
+    const focused = state.garayeSpeakerFocus === item.name;
+    const dimmed = state.garayeSpeakerFocus && !focused;
+    const avatar = `<span class="person-avatar">${personId ? `<img src="/admin/portraits/${personId}" alt="${esc(item.name)}" onerror="this.remove()">` : ""}<i>${esc(initials)}</i></span>`;
+    return `<article class="garaye-speaker-row${focused ? " is-focused" : ""}${dimmed ? " is-dimmed" : ""}" data-speaker-name="${esc(item.name)}">${avatar}<div><b>${esc(item.name)}</b><p>${esc(person?.position || person?.category || "گویندهٔ خبرهای نهایی")}</p></div><small>${n(item.total)} خبر</small></article>`;
+  }).join("") : `<div class="empty-mini">هنوز گویندهٔ مشخصی در این بازه نیست.</div>`;
+  box.querySelectorAll("[data-speaker-name]").forEach((row) => {
+    row.addEventListener("click", () => setGarayeSpeakerFocus(row.getAttribute("data-speaker-name") || ""));
+  });
 }
 
 function setGarayeRangePreset(preset, {load = false} = {}) {
@@ -773,6 +1223,349 @@ function setGarayeRangePreset(preset, {load = false} = {}) {
   if (load && state.page === "garaye") loadGarayeInsights().catch((error) => toast(error.message, true));
 }
 
+function toggleEitanCreate(show) {
+  state.eitanCreating = Boolean(show);
+  const panel = $("eitanCreatePanel");
+  if (panel) panel.hidden = !state.eitanCreating;
+  if (state.eitanCreating) $("eitanAxisTitle")?.focus();
+}
+
+function renderEitanAxes() {
+  const host = $("eitanAxisButtons");
+  if (!host) return;
+  host.innerHTML = "";
+  (state.eitanAxes || []).forEach((axis) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `eitan-axis-btn${state.eitanAxisId === axis.axis_id ? " is-active" : ""}`;
+    button.textContent = axis.title;
+    button.addEventListener("click", () => selectEitanAxis(axis.axis_id).catch((error) => toast(error.message, true)));
+    host.appendChild(button);
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "eitan-axis-btn eitan-axis-add";
+  add.textContent = "اضافه کردن محور جدید";
+  add.addEventListener("click", () => toggleEitanCreate(true));
+  host.appendChild(add);
+}
+
+function eitanBarChart(rows, emptyText) {
+  const items = rows || [];
+  if (!items.length) return `<div class="empty-mini">${esc(emptyText)}</div>`;
+  const max = Math.max(...items.map((item) => Number(item.count || 0)), 1);
+  return `<div class="eitan-bar-list">${items.map((item) => `
+    <div class="eitan-bar-row">
+      <b>${esc(item.label)}</b>
+      <span class="eitan-bar-track"><i style="width:${Math.max(6, (Number(item.count || 0) / max) * 100)}%"></i></span>
+      <small>${n(item.count)}</small>
+    </div>`).join("")}</div>`;
+}
+
+function eitanCard(title, body, wide = false) {
+  return `<article class="panel eitan-chart-card${wide ? " is-wide" : ""}"><div class="panel-heading"><h3>${esc(title)}</h3></div>${body}</article>`;
+}
+
+function eitanColumnChart(rows, emptyText) {
+  const items = (rows || []).slice(0, 10);
+  if (!items.length) return `<div class="empty-mini">${esc(emptyText)}</div>`;
+  const width = 1000;
+  const height = 280;
+  const pad = {top: 18, right: 18, bottom: 78, left: 48};
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const max = Math.max(1, ...items.map((item) => Number(item.count || 0)));
+  const slot = plotWidth / items.length;
+  const barWidth = Math.max(18, slot * 0.58);
+  const bars = items.map((item, index) => {
+    const value = Number(item.count || 0);
+    const barHeight = (value / max) * plotHeight;
+    const x = pad.left + index * slot + (slot - barWidth) / 2;
+    const y = pad.top + plotHeight - barHeight;
+    const fill = GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length];
+    return `<g>
+      <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(2, barHeight).toFixed(1)}" rx="8" fill="${fill}">
+        <title>${esc(item.label)}: ${n(value)}</title>
+      </rect>
+      <text x="${(x + barWidth / 2).toFixed(1)}" y="${height - 52}" class="trend-axis-label eitan-col-label">${esc(item.label)}</text>
+      <text x="${(x + barWidth / 2).toFixed(1)}" y="${Math.max(pad.top + 12, y - 8).toFixed(1)}" class="trend-axis-label eitan-col-value">${n(value)}</text>
+    </g>`;
+  }).join("");
+  return `<svg class="trend-svg eitan-column-svg" viewBox="0 0 ${width} ${height}" role="img">${bars}</svg>`;
+}
+
+function eitanHeatmapChart(payload, emptyText) {
+  const matrix = payload?.matrix || [];
+  const cols = payload?.cols || [];
+  if (!matrix.length || !cols.length) return `<div class="empty-mini">${esc(emptyText)}</div>`;
+  const max = Math.max(1, ...matrix.flatMap((row) => (row.cells || []).map((cell) => Number(cell.count || 0))));
+  const head = `<tr><th></th>${cols.map((col) => `<th>${esc(col)}</th>`).join("")}</tr>`;
+  const body = matrix.map((row) => `<tr><th>${esc(row.row)}</th>${(row.cells || []).map((cell) => {
+    const value = Number(cell.count || 0);
+    const share = value / max;
+    const background = `hsla(174, ${38 + share * 42}%, ${96 - share * 52}%, 1)`;
+    const color = share > 0.55 ? "#f7fffe" : "#073c3d";
+    return `<td style="background:${background};color:${color}">${value ? n(value) : "—"}</td>`;
+  }).join("")}</tr>`).join("");
+  return `<div class="eitan-heatmap"><table>${head}${body}</table></div>`;
+}
+
+function eitanSankeyChart(links, emptyText) {
+  const items = (links || []).filter((item) => item.source && item.target && Number(item.count || 0) > 0);
+  if (!items.length) return `<div class="empty-mini">${esc(emptyText)}</div>`;
+  const sources = [...new Set(items.map((item) => item.source))];
+  const targets = [...new Set(items.map((item) => item.target))];
+  const width = 1000;
+  const height = Math.max(260, Math.max(sources.length, targets.length) * 42 + 48);
+  const leftX = 28;
+  const rightX = 780;
+  const yAt = (list, index) => (list.length === 1 ? height / 2 : 28 + index * ((height - 56) / Math.max(list.length - 1, 1)));
+  const max = Math.max(1, ...items.map((item) => Number(item.count || 0)));
+  const paths = items.map((item, index) => {
+    const y1 = yAt(sources, sources.indexOf(item.source));
+    const y2 = yAt(targets, targets.indexOf(item.target));
+    const stroke = 6 + (Number(item.count || 0) / max) * 18;
+    const color = GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length];
+    return `<path d="M 190 ${y1.toFixed(1)} C 430 ${y1.toFixed(1)}, 570 ${y2.toFixed(1)}, 780 ${y2.toFixed(1)}" fill="none" stroke="${color}" stroke-width="${stroke.toFixed(1)}" stroke-opacity="0.42">
+      <title>${esc(item.source)} ← ${esc(item.target)}: ${n(item.count)}</title>
+    </path>`;
+  }).join("");
+  const leftNodes = sources.map((label, index) => `<g>
+    <rect x="${leftX}" y="${(yAt(sources, index) - 14).toFixed(1)}" width="150" height="28" rx="10" fill="#edf8f6" stroke="rgba(0,78,79,.16)"/>
+    <text x="${leftX + 75}" y="${(yAt(sources, index) + 5).toFixed(1)}" class="eitan-flow-label">${esc(label)}</text>
+  </g>`).join("");
+  const rightNodes = targets.map((label, index) => `<g>
+    <rect x="${rightX}" y="${(yAt(targets, index) - 14).toFixed(1)}" width="190" height="28" rx="10" fill="#fff7ed" stroke="rgba(0,78,79,.16)"/>
+    <text x="${rightX + 95}" y="${(yAt(targets, index) + 5).toFixed(1)}" class="eitan-flow-label">${esc(label)}</text>
+  </g>`).join("");
+  return `<svg class="trend-svg eitan-sankey-svg" viewBox="0 0 ${width} ${height}" role="img">${paths}${leftNodes}${rightNodes}</svg>`;
+}
+
+function renderEitanTreemap(hostId, rows, emptyText) {
+  const host = $(hostId);
+  if (!host) return;
+  const items = (rows || [])
+    .map((item) => ({name: item.label || item.name, value: Number(item.count || item.value || 0)}))
+    .filter((item) => item.name && item.value > 0);
+  if (!items.length) {
+    host.innerHTML = `<div class="garaye-treemap-empty">${esc(emptyText)}</div>`;
+    return;
+  }
+  const width = 1000;
+  const height = 420;
+  const maxValue = Math.max(1, ...items.map((item) => item.value));
+  const cells = layoutTreemap(items, width, height);
+  host.innerHTML = cells.map((cell, index) => {
+    const share = cell.value / maxValue;
+    const fill = GARAYE_LINE_PALETTE[index % GARAYE_LINE_PALETTE.length];
+    const ink = share > 0.42 ? "#f7fffe" : "#073c3d";
+    const showLabel = cell.w > 78 && cell.h > 36;
+    const showCount = cell.w > 96 && cell.h > 58;
+    return `<div class="garaye-treemap-cell" title="${esc(cell.name)} · ${n(cell.value)}" style="left:${(cell.x / width) * 100}%;top:${(cell.y / height) * 100}%;width:${(cell.w / width) * 100}%;height:${(cell.h / height) * 100}%;background:${fill};color:${ink};opacity:${0.72 + share * 0.28}">${showLabel ? `<b>${esc(cell.name)}</b>${showCount ? `<small>${n(cell.value)}</small>` : ""}` : ""}</div>`;
+  }).join("");
+}
+
+function renderEitanCharts() {
+  const host = $("eitanCharts");
+  const workspace = $("eitanWorkspace");
+  if (!host || !workspace) return;
+  const selected = Boolean(state.eitanAxisId);
+  workspace.classList.toggle("hidden", !selected);
+  host.classList.toggle("hidden", !selected);
+  if (!selected) {
+    host.innerHTML = "";
+    return;
+  }
+  const insights = state.eitanInsights || {};
+  const library = insights.library || {};
+  const keywordRows = insights.keywords || insights.terms || [];
+  const personRows = insights.people || [];
+  const cards = [
+    eitanCard("روند منحنی روزانه", `<div id="eitanTrendChart" class="trend-chart"></div><div id="eitanTrendLegend" class="trend-legend"></div>`, true),
+    eitanCard("کلیدواژه‌های پرتکرار", eitanColumnChart(keywordRows, "کلیدواژه‌ای در پیام‌ها تکرار نشده است.")),
+    eitanCard("افراد پرتکرار", eitanColumnChart(personRows, "نامی از کتابخانه افراد در پیام‌ها پیدا نشد.")),
+    eitanCard("نقشه درختی دسته‌ها", `<div id="eitanCategoryTreemap" class="garaye-treemap eitan-treemap"></div>`, true),
+    eitanCard("نقشه حرارتی دسته و زیردسته", eitanHeatmapChart(insights.heatmap, "برای نقشه حرارتی هنوز تقاطع دسته و زیردسته موجود نیست."), true),
+    eitanCard("جریان دسته به زیردسته", eitanSankeyChart(insights.keyword_flow, "جریان دسته به زیردسته ساخته نشد."), true),
+  ];
+  if ((insights.person_flow || []).length) {
+    cards.push(eitanCard("جریان خوشه دید به افراد", eitanSankeyChart(insights.person_flow, "جریان افراد ساخته نشد."), true));
+  } else if ((insights.cluster_flow || []).length) {
+    cards.push(eitanCard("جریان خوشه به زیرخوشه", eitanSankeyChart(insights.cluster_flow, "جریان خوشه‌ها ساخته نشد."), true));
+  }
+  cards.push(eitanCard("منابع", eitanBarChart(insights.sources, "منبع منطبقی پیدا نشد.")));
+  cards.push(eitanCard("نهادها", eitanBarChart(insights.institutions, "نهادی از کتابخانه افراد در پیام‌ها نیامده است.")));
+  if ((insights.roles || []).length) cards.push(eitanCard("نقش‌ها", eitanBarChart(insights.roles, "نقشی برای نمایش نیست.")));
+  if ((insights.clusters || []).length) {
+    cards.push(eitanCard("نقشه درختی خوشه‌های دید", `<div id="eitanClusterTreemap" class="garaye-treemap eitan-treemap"></div>`));
+  }
+  if ((insights.kinds || []).length) cards.push(eitanCard("نوع تطبیق", eitanBarChart(insights.kinds, "")));
+  host.innerHTML = cards.join("");
+  const trend = insights.trend || {};
+  const trendDays = trend.days || (insights.daily || []).map((item) => item.label);
+  const trendSeries = (trend.series || []).filter((item) => Number(item.total || 0) > 0);
+  renderCurvedTrendChart("eitanTrendChart", "eitanTrendLegend", {
+    days: trendDays,
+    series: trendSeries.length ? trendSeries : [{
+      name: "کل پیام‌ها",
+      values: (insights.daily || []).map((item) => Number(item.count || 0)),
+      total: (insights.daily || []).reduce((sum, item) => sum + Number(item.count || 0), 0),
+    }],
+    emptyText: "برای این محور هنوز روند روزانه‌ای نیست.",
+    ariaLabel: "نمودار منحنی روزانه ایتان گرا",
+  });
+  renderEitanTreemap("eitanCategoryTreemap", insights.categories, "دسته‌ای از Keyword_Library در پیام‌ها تکرار نشده است.");
+  renderEitanTreemap("eitanClusterTreemap", insights.clusters, "خوشهٔ دیدی برای نمایش نیست.");
+  if ($("eitanLibraryTitle")) $("eitanLibraryTitle").textContent = `کتابخانهٔ «${state.eitanAxes.find((axis) => axis.axis_id === state.eitanAxisId)?.title || "محور"}»`;
+  if ($("eitanLibraryHint")) {
+    $("eitanLibraryHint").textContent = `${n(library.keyword_count || 0)} کلیدواژه · ${n(library.people_count || 0)} فرد · ${n(library.category_count || library.cluster_count || 0)} دسته`;
+  }
+}
+
+function renderEitanMessages() {
+  const grid = $("eitanMessageGrid");
+  if (!grid) return;
+  const items = state.eitanMessages || [];
+  grid.innerHTML = items.length ? items.map((item) => {
+    const sender = senderLabel(item);
+    const analysisComplete = item.ai_enrichment_status === "validated" || Boolean((item.speaker_tags || []).length);
+    const timestamp = fdateParts(item.published_at || item.received_at || item.created_at);
+    const origin = item.forwarded_origin_title || (item.forwarded_origin_username ? `@${item.forwarded_origin_username}` : "پیام مستقیم");
+    const analysisTags = (item.speaker_tags || []).map((tag) => `
+      <span class="status-pill approved" title="${esc(tag.specific_topic || "")}">
+        ${esc(tag.speaker_name || "نامشخص")} · ${esc(tag.general_topic || "نامشخص")}
+      </span>`).join("");
+    return `<article class="message-card ${analysisComplete ? "analysis-complete" : ""}"${analysisComplete ? ' data-analysis-state="complete"' : ""}>
+      <div class="message-head"><div class="message-source"><span class="source-avatar">${esc((item.source_chat_title || "خ").slice(0, 1))}</span><b>${esc(item.source_chat_title || item.source_chat_username || "منبع")}</b></div></div>
+      <div><span class="status-pill ${esc(item.status)}">${statusLabel(item.status)}</span>${analysisComplete ? `<span class="analysis-status-tag">تحلیل‌شده</span>` : ""} ${analysisTags || (item.detected_person_name ? `<span class="status-pill">${esc(item.detected_person_name)}</span>` : "")}</div>
+      ${messageCardBody(item)}
+      <div class="trace-meta"><span>👤 ارسال‌کننده/کارشناس: <b>${esc(sender)}</b></span><span>📍 مبدأ فوروارد: <b>${esc(origin)}</b></span></div>
+      <div class="message-meta"><span class="message-timestamp"><span>${esc(timestamp.date)}</span><time datetime="${esc(timestamp.raw)}">${esc(timestamp.time)}</time></span><span>${n(item.media_count)} رسانه · ${n(item.link_count)} لینک</span></div>
+      <div class="message-actions"><button class="detail-btn" onclick="openMessage(${item.id})">جزئیات</button></div>
+    </article>`;
+  }).join("") : `<div class="panel empty-mini">${state.eitanAxisId ? "پیامی مطابق این محور پیدا نشد." : ""}</div>`;
+  const pageCount = Math.max(1, Math.ceil(Number(state.eitanTotal || 0) / state.eitanPageSize));
+  renderPager({
+    bar: "eitanPager",
+    numbers: "eitanPageNumbers",
+    hint: "eitanMoreHint",
+    prev: "eitanPrevPage",
+    next: "eitanNextPage",
+  }, {
+    page: state.eitanPage,
+    pageCount,
+    total: state.eitanTotal,
+    pageSize: state.eitanPageSize,
+    onSelect: (page) => {
+      if (page === state.eitanPage) return;
+      state.eitanPage = page;
+      loadEitanMessages().catch((error) => toast(error.message, true));
+    },
+  });
+}
+
+async function loadEitanMessages() {
+  if (!state.eitanAxisId) {
+    state.eitanMessages = [];
+    state.eitanTotal = 0;
+    state.eitanPage = 1;
+    state.eitanInsights = null;
+    if ($("eitanCount")) $("eitanCount").textContent = "";
+    if ($("eitanSelectionHint")) $("eitanSelectionHint").textContent = "";
+    renderEitanCharts();
+    renderEitanMessages();
+    return;
+  }
+  const pageSize = state.eitanPageSize;
+  const pageCountGuess = Math.max(1, Math.ceil(Number(state.eitanTotal || 0) / pageSize) || 1);
+  if (state.eitanPage > pageCountGuess) state.eitanPage = pageCountGuess;
+  const offset = (state.eitanPage - 1) * pageSize;
+  const data = await api(`/admin/api/eitan-axes/${encodeURIComponent(state.eitanAxisId)}/messages?limit=${pageSize}&offset=${offset}`);
+  state.eitanTotal = Number(data.total || 0);
+  const maxPage = Math.max(1, Math.ceil(state.eitanTotal / pageSize) || 1);
+  if (state.eitanPage > maxPage) {
+    state.eitanPage = maxPage;
+    return loadEitanMessages();
+  }
+  state.eitanMessages = data.items || [];
+  const axisTitle = data.axis?.title || "محور";
+  if ($("eitanCount")) $("eitanCount").textContent = `${n(state.eitanTotal)} پیام برای «${axisTitle}»`;
+  if ($("eitanSelectionHint")) {
+    $("eitanSelectionHint").textContent = `${n(data.group_count || 0)} قاعده از کتابخانه در همهٔ پیام‌های سامانه اعمال شد.`;
+  }
+  renderEitanMessages();
+}
+
+async function loadEitanInsights() {
+  if (!state.eitanAxisId) {
+    state.eitanInsights = null;
+    renderEitanCharts();
+    return;
+  }
+  state.eitanInsights = await api(`/admin/api/eitan-axes/${encodeURIComponent(state.eitanAxisId)}/insights`);
+  renderEitanCharts();
+}
+
+async function selectEitanAxis(axisId) {
+  state.eitanAxisId = axisId;
+  state.eitanPage = 1;
+  state.eitanInsights = null;
+  toggleEitanCreate(false);
+  renderEitanAxes();
+  renderEitanCharts();
+  await Promise.all([loadEitanMessages(), loadEitanInsights()]);
+}
+
+async function loadEitanGaraPage() {
+  const data = await api("/admin/api/eitan-axes");
+  state.eitanAxes = data.items || [];
+  if (state.eitanAxisId && !state.eitanAxes.some((axis) => axis.axis_id === state.eitanAxisId)) {
+    state.eitanAxisId = "";
+    state.eitanMessages = [];
+    state.eitanInsights = null;
+  }
+  renderEitanAxes();
+  if (state.eitanAxisId) await Promise.all([loadEitanMessages(), loadEitanInsights()]);
+  else {
+    renderEitanCharts();
+    renderEitanMessages();
+  }
+}
+
+async function submitEitanCreate(event) {
+  event.preventDefault();
+  const title = $("eitanAxisTitle")?.value.trim() || "";
+  const library = $("eitanLibraryFile")?.files?.[0];
+  if (!title) {
+    toast("عنوان محور را وارد کنید.", true);
+    return;
+  }
+  if (!library) {
+    toast("فایل کتابخانه را انتخاب کنید.", true);
+    return;
+  }
+  const body = new FormData();
+  body.append("title", title);
+  body.append("library_file", library);
+  const created = await api("/admin/api/eitan-axes", {method: "POST", body});
+  toast(`محور «${created.title}» ثبت شد.`);
+  $("eitanCreatePanel")?.reset();
+  toggleEitanCreate(false);
+  await loadEitanGaraPage();
+  if (created.axis_id) await selectEitanAxis(created.axis_id);
+}
+
+async function replaceEitanLibrary(file) {
+  if (!state.eitanAxisId || !file) return;
+  const body = new FormData();
+  body.append("library_file", file);
+  const updated = await api(`/admin/api/eitan-axes/${encodeURIComponent(state.eitanAxisId)}/library`, {method: "POST", body});
+  toast("کتابخانهٔ محور جایگزین شد و جست‌وجو از نو اجرا می‌شود.");
+  state.eitanPage = 1;
+  await loadEitanGaraPage();
+  if (updated.axis_id) await selectEitanAxis(updated.axis_id);
+}
+
 async function loadSources(silent = false) {
   const [sources, crawler] = await Promise.all([
     api("/admin/api/sources"),
@@ -787,32 +1580,43 @@ async function loadSources(silent = false) {
     const health = error
       ? `<br><span class="source-receipt-error" title="${esc(error)}">آخرین خطا: ${esc(error.length > 160 ? `${error.slice(0, 160)}…` : error)}</span>`
       : "";
+    const canEditSources = (state.me?.permissions || []).some((permission) => permission === "*" || permission === "sources.manage");
+    const titleEditor = canEditSources
+      ? `<div class="source-title-edit"><input data-source-title="${item.id}" value="${esc(item.title || item.username || "")}" placeholder="عنوان یا نام منبع"><button type="button" class="outline-button" onclick="saveSourceTitle(${item.id})">ثبت عنوان</button></div>`
+      : "";
     return `
     <article class="source-card">
       <div class="source-card-top"><div><h4>${esc(item.title || item.username || "منبع")}</h4><span class="status-pill ${Number(item.enabled) ? "approved" : "rejected"}">${Number(item.enabled) ? "فعال" : "غیرفعال"}</span></div>
       <button class="switch ${Number(item.enabled) ? "on" : "off"}" onclick="toggleSource(${item.id},${!Number(item.enabled)})">${Number(item.enabled) ? "روشن" : "خاموش"}</button></div>
       <p>${item.username ? `@${esc(item.username)}` : `شناسه: ${esc(item.chat_id)}`}<br>نوع: ${sourceTypeLabels[item.chat_type] || "منبع پایش"}<br>آخرین دریافت موفق: ${fdate(lastSuccess)}${health}</p>
+      ${titleEditor}
     </article>`;
   }).join("") : `<div class="empty-mini">هنوز منبعی ثبت نشده است.</div>`;
-  $("crawlerChannels").value = (crawler.channels || []).join("\n");
-  $("crawlerBadge").className = `status-pill ${crawler.process_running ? "approved" : "pending"}`;
-  $("crawlerBadge").textContent = crawler.process_running
-    ? (crawler.enabled ? "در حال کرول" : "در حال توقف امن")
-    : (crawler.enabled ? "آمادهٔ اجرا" : "متوقف");
-  $("crawlerHelp").textContent =
-    `${n((crawler.channels || []).length)} کانال · هر ${n(Math.round((crawler.repeat_seconds || 1800) / 60))} دقیقه · ` +
-    `پروفایل Firefox: ${crawler.firefox_profile_configured ? "تنظیم‌شده" : "تشخیص خودکار"} · ` +
-    `مقصد: ${crawler.destination_configured ? "تنظیم‌شده" : "تنظیم‌نشده"}`;
+  if ($("crawlerChannels")) $("crawlerChannels").value = (crawler.channels || []).join("\n");
+  if ($("crawlerBadge")) {
+    $("crawlerBadge").className = `status-pill ${crawler.process_running ? "approved" : "pending"}`;
+    $("crawlerBadge").textContent = crawler.process_running
+      ? (crawler.enabled ? "در حال کرول" : "در حال توقف امن")
+      : (crawler.enabled ? "آمادهٔ اجرا" : "متوقف");
+  }
+  if ($("crawlerHelp")) {
+    $("crawlerHelp").textContent =
+      `${n((crawler.channels || []).length)} کانال · هر ${n(Math.round((crawler.repeat_seconds || 1800) / 60))} دقیقه · ` +
+      `پروفایل Firefox: ${crawler.firefox_profile_configured ? "تنظیم‌شده" : "تشخیص خودکار"} · ` +
+      `مقصد: ${crawler.destination_configured ? "تنظیم‌شده" : "تنظیم‌نشده"}`;
+  }
   const crawlerToggle = $("crawlerEnabledToggle");
-  crawlerToggle.className = `switch ${crawler.enabled ? "on" : "off"}`;
-  crawlerToggle.textContent = crawler.enabled ? "روشن" : "خاموش";
-  crawlerToggle.setAttribute("aria-pressed", String(Boolean(crawler.enabled)));
-  crawlerToggle.dataset.enabled = String(Boolean(crawler.enabled));
-  crawlerToggle.title = crawler.process_running
-    ? "تغییر وضعیت در دور جاری نیز بررسی می‌شود."
-    : "برای اجرای Selenium از دکمهٔ «اجرای کرولر» استفاده کنید.";
-  $("startCrawler").disabled = Boolean(crawler.process_running && crawler.enabled);
-  $("stopCrawler").disabled = !crawler.process_running && !crawler.enabled;
+  if (crawlerToggle) {
+    crawlerToggle.className = `switch ${crawler.enabled ? "on" : "off"}`;
+    crawlerToggle.textContent = crawler.enabled ? "روشن" : "خاموش";
+    crawlerToggle.setAttribute("aria-pressed", String(Boolean(crawler.enabled)));
+    crawlerToggle.dataset.enabled = String(Boolean(crawler.enabled));
+    crawlerToggle.title = crawler.process_running
+      ? "تغییر وضعیت در دور جاری نیز بررسی می‌شود."
+      : "برای اجرای Selenium از دکمهٔ «اجرای کرولر» استفاده کنید.";
+  }
+  if ($("startCrawler")) $("startCrawler").disabled = Boolean(crawler.process_running && crawler.enabled);
+  if ($("stopCrawler")) $("stopCrawler").disabled = !crawler.process_running && !crawler.enabled;
   if (!silent) $("connectionLabel").textContent = `${n(state.sources.filter((item) => Number(item.enabled)).length)} منبع فعال`;
 }
 
@@ -821,6 +1625,17 @@ async function toggleSource(id, enabled) {
     await api(`/admin/api/sources/${id}`, {method: "PATCH", body: JSON.stringify({enabled})});
     toast("وضعیت منبع تغییر کرد.");
     await loadSources();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function saveSourceTitle(id) {
+  const input = document.querySelector(`[data-source-title="${id}"]`);
+  const title = input?.value.trim() || "";
+  if (!title) return toast("عنوان یا نام منبع را وارد کنید.", true);
+  try {
+    await api(`/admin/api/sources/${id}`, {method: "PATCH", body: JSON.stringify({title})});
+    toast("عنوان منبع به‌روزرسانی شد.");
+    await loadSources(true);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -863,42 +1678,54 @@ async function stopCrawlerFromDashboard() {
   finally { button.textContent = oldText; }
 }
 
-async function loadStream({append = false} = {}) {
+async function loadStream({page} = {}) {
   if (!state.sources.length) await loadSources(true);
-  const pageSize = ($("streamFrom").value.trim() || $("streamTo").value.trim()) ? 500 : 150;
-  if (!append) {
-    state.streamOffset = 0;
-    state.messages = [];
-  }
-  const params = new URLSearchParams({limit: String(pageSize), offset: String(state.streamOffset)});
-  if ($("streamQuery").value.trim()) params.set("q", $("streamQuery").value.trim());
-  if ($("streamStatus").value) params.set("status", $("streamStatus").value);
-  if ($("streamSource").value) params.set("source_chat_id", $("streamSource").value);
-  if ($("streamFrom").value.trim()) params.set("date_from_jalali", $("streamFrom").value.trim());
-  if ($("streamTo").value.trim()) params.set("date_to_jalali", $("streamTo").value.trim());
+  const pageSize = state.streamPageSize;
+  if (Number.isFinite(Number(page))) state.streamPage = Math.max(1, Number(page));
+  const offset = (state.streamPage - 1) * pageSize;
+  const params = streamQueryParams({limit: String(pageSize), offset: String(offset)});
   const data = await api(`/admin/api/messages?${params}`);
-  const incoming = data.items || [];
   state.streamTotal = Number(data.total || 0);
-  state.messages = append ? state.messages.concat(incoming) : incoming;
-  state.streamOffset = state.messages.length;
-  const visibleIds = new Set(state.messages.map((item) => Number(item.id)).filter(Number.isFinite));
-  state.selectedMessages = new Set([...state.selectedMessages].filter((id) => visibleIds.has(Number(id))));
-  $("streamCount").textContent = `${n(state.streamTotal)} پیام`;
-  const moreBar = $("streamMoreBar");
-  if (moreBar) {
-    const remaining = Math.max(0, state.streamTotal - state.messages.length);
-    moreBar.classList.toggle("hidden", remaining <= 0);
-    $("streamMoreHint").textContent = remaining
-      ? `${n(state.messages.length)} از ${n(state.streamTotal)} خبر همین فیلتر نمایش داده شده است.`
-      : "";
+  const maxPage = Math.max(1, Math.ceil(state.streamTotal / pageSize) || 1);
+  if (state.streamPage > maxPage) {
+    state.streamPage = maxPage;
+    return loadStream();
   }
+  state.messages = data.items || [];
+  state.streamOffset = offset;
+  $("streamCount").textContent = `${n(state.streamTotal)} پیام`;
+  renderPager({
+    bar: "streamPager",
+    numbers: "streamPageNumbers",
+    hint: "streamMoreHint",
+    prev: "streamPrevPage",
+    next: "streamNextPage",
+  }, {
+    page: state.streamPage,
+    pageCount: maxPage,
+    total: state.streamTotal,
+    pageSize,
+    onSelect: (nextPage) => {
+      if (nextPage === state.streamPage) return;
+      loadStream({page: nextPage}).catch((error) => toast(error.message, true));
+    },
+  });
   renderMessages();
   updateStreamSelectionHint();
-  if (!append && ($("streamFrom").value.trim() || $("streamTo").value.trim())) {
-    while (state.messages.length < state.streamTotal && state.streamOffset < 5000) {
-      await loadStream({append: true});
-    }
-  }
+}
+
+function streamQueryParams(extra = {}) {
+  const params = new URLSearchParams(extra);
+  if ($("streamQuery")?.value.trim()) params.set("q", $("streamQuery").value.trim());
+  if ($("streamStatus")?.value) params.set("status", $("streamStatus").value);
+  if ($("streamSource")?.value) params.set("source_chat_id", $("streamSource").value);
+  if ($("streamFrom")?.value.trim()) params.set("date_from_jalali", $("streamFrom").value.trim());
+  if ($("streamTo")?.value.trim()) params.set("date_to_jalali", $("streamTo").value.trim());
+  const timeFrom = clock24($("streamTimeFrom")?.value || "");
+  const timeTo = clock24($("streamTimeTo")?.value || "");
+  if (timeFrom) params.set("time_from", timeFrom);
+  if (timeTo) params.set("time_to", timeTo);
+  return params;
 }
 
 function removeLegacyModerationControls(root = document) {
@@ -910,9 +1737,86 @@ function removeLegacyModerationControls(root = document) {
   ).forEach((button) => button.remove());
 }
 
+function formatMediaDuration(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return `${faDigits(minutes)}:${faDigits(String(rest).padStart(2, "0"))}`;
+}
+
+function messageMediaItems(item) {
+  const assets = Array.isArray(item?.media_items) ? item.media_items : [];
+  const best = new Map();
+  const rank = {photo: 5, video: 5, audio: 5, animation: 4, video_note: 3, voice: 3, sticker: 2, document: 1};
+  for (const asset of assets) {
+    const key = asset.play || asset.kind || asset.url;
+    if (!key) continue;
+    const prev = best.get(key);
+    const score = (left, right) => {
+      const leftRank = (rank[left?.kind] || 0) * 1e12 + Number(left?.file_size || 0);
+      const rightRank = (rank[right?.kind] || 0) * 1e12 + Number(right?.file_size || 0);
+      return leftRank - rightRank;
+    };
+    if (!prev || score(asset, prev) > 0) best.set(key, asset);
+  }
+  return [...best.values()];
+}
+
+function handleStreamMediaError(el) {
+  const node = el?.closest?.(".message-media-photo, .message-media-audio") || el;
+  if (!node || node.dataset.mediaFailed === "1") return;
+  if (node.dataset) node.dataset.mediaFailed = "1";
+  const label = el?.getAttribute?.("data-media-label") || el?.getAttribute?.("alt") || "رسانه";
+  const note = document.createElement("div");
+  note.className = "message-media-note";
+  note.textContent = `بارگذاری «${label}» ناموفق بود.`;
+  node.replaceWith(note);
+}
+
+function renderMessageMedia(item) {
+  const assets = messageMediaItems(item);
+  if (!assets.length) return "";
+  const kindLabel = (kind) => ({
+    photo: "تصویر",
+    video: "ویدیو",
+    animation: "ویدیو",
+    video_note: "ویدیو",
+    audio: "صوت",
+    voice: "پیام صوتی",
+    sticker: "استیکر",
+    document: "فایل",
+  })[kind] || "رسانه";
+  return `<div class="message-media">${assets.map((asset) => {
+    const label = kindLabel(asset.kind);
+    if (asset.too_large || !asset.url) {
+      return `<div class="message-media-note">«${esc(label)}» بزرگ‌تر از سقف ۲۰ مگابایت بله است و پخش نمی‌شود.</div>`;
+    }
+    if (asset.play === "image") {
+      return `<a class="message-media-photo" href="${esc(asset.url)}" target="_blank" rel="noopener"><img src="${esc(asset.url)}" alt="${esc(asset.file_name || label)}" data-media-label="${esc(label)}" loading="lazy" onerror="handleStreamMediaError(this)"></a>`;
+    }
+    if (asset.play === "video") {
+      return `<video class="message-media-video" controls preload="metadata" playsinline src="${esc(asset.url)}" data-media-label="${esc(label)}" onerror="handleStreamMediaError(this)"></video>`;
+    }
+    if (asset.play === "audio") {
+      const duration = formatMediaDuration(asset.duration);
+      return `<div class="message-media-audio"><span>${esc(asset.file_name || label)}${duration ? ` · ${duration}` : ""}</span><audio controls preload="metadata" src="${esc(asset.url)}" data-media-label="${esc(label)}" onerror="handleStreamMediaError(this)"></audio></div>`;
+    }
+    return `<a class="outline-button" href="${esc(asset.url)}" target="_blank" rel="noopener">دانلود ${esc(label)}</a>`;
+  }).join("")}</div>`;
+}
+
+function messageCardBody(item) {
+  const text = String(item.text || item.caption || "").trim();
+  const media = renderMessageMedia(item);
+  const copy = text
+    ? `<div class="message-text">${esc(text)}</div>`
+    : (media ? "" : `<div class="message-text">[پیام رسانه‌ای]</div>`);
+  return `${media}${copy}`;
+}
+
 function renderMessages() {
   $("messageGrid").innerHTML = state.messages.length ? state.messages.map((item) => {
-    const text = item.text || item.caption || "[پیام رسانه‌ای]";
     const selected = state.selectedMessages.has(item.id);
     const sender = senderLabel(item);
     const analysisComplete = item.ai_enrichment_status === "validated" || Boolean((item.speaker_tags || []).length);
@@ -925,7 +1829,7 @@ function renderMessages() {
     return `<article class="message-card ${selected ? "selected" : ""} ${analysisComplete ? "analysis-complete" : ""}"${analysisComplete ? ' data-analysis-state="complete"' : ""}>
       <div class="message-head"><div class="message-source"><span class="source-avatar">${esc((item.source_chat_title || "خ").slice(0, 1))}</span><b>${esc(item.source_chat_title || item.source_chat_username || "منبع")}</b></div><input class="select-check" type="checkbox" ${selected ? "checked" : ""} onchange="selectMessage(${item.id},this.checked)" aria-label="انتخاب پیام"></div>
       <div><span class="status-pill ${esc(item.status)}">${statusLabel(item.status)}</span>${analysisComplete ? `<span class="analysis-status-tag">تحلیل‌شده</span>` : ""} ${analysisTags || (item.detected_person_name ? `<span class="status-pill">${esc(item.detected_person_name)}</span>` : "")}</div>
-      <div class="message-text">${esc(text)}</div>
+      ${messageCardBody(item)}
       <div class="trace-meta"><span>👤 ارسال‌کننده/کارشناس: <b>${esc(sender)}</b></span><span>📍 مبدأ فوروارد: <b>${esc(origin)}</b></span></div>
       <div class="message-meta"><span class="message-timestamp"><span>${esc(timestamp.date)}</span><time datetime="${esc(timestamp.raw)}">${esc(timestamp.time)}</time></span><span>${n(item.media_count)} رسانه · ${n(item.link_count)} لینک</span></div>
       <div class="message-actions"><button class="detail-btn" onclick="openMessage(${item.id})">جزئیات</button></div>
@@ -943,23 +1847,38 @@ function selectMessage(id, selected) {
 function updateStreamSelectionHint() {
   const count = state.selectedMessages.size;
   const visibleIds = state.messages.map((item) => Number(item.id)).filter(Number.isFinite);
-  const visibleSelected = visibleIds.filter((id) => state.selectedMessages.has(id)).length;
   $("streamSelectionHint").textContent = count
     ? `${n(count)} پیام برای تحلیل با مدل اول انتخاب شده است.`
     : "پیام‌های موردنظر را برای تحلیل با مدل اول انتخاب کنید.";
   const selectAll = $("selectVisibleMessages");
   const clear = $("clearMessageSelection");
-  selectAll.disabled = !visibleIds.length || visibleSelected === visibleIds.length;
+  const allMatchingSelected = count > 0 && count >= Number(state.streamTotal || 0) && Number(state.streamTotal || 0) > 0;
+  selectAll.disabled = !Number(state.streamTotal || visibleIds.length) || allMatchingSelected;
   selectAll.textContent = "انتخاب همه";
   clear.disabled = count === 0;
 }
 
-function selectVisibleMessages() {
-  state.selectedMessages = new Set(
-    state.messages.map((item) => Number(item.id)).filter(Number.isFinite)
-  );
-  renderMessages();
-  updateStreamSelectionHint();
+async function selectVisibleMessages() {
+  const button = $("selectVisibleMessages");
+  const oldText = button.textContent;
+  button.disabled = true;
+  button.textContent = "در حال انتخاب…";
+  try {
+    const result = await api(`/admin/api/messages/ids?${streamQueryParams()}`);
+    const ids = (result.ids || []).map((id) => Number(id)).filter(Number.isFinite);
+    state.selectedMessages = new Set(ids);
+    renderMessages();
+    updateStreamSelectionHint();
+    const total = Number(result.total || ids.length);
+    if (total > ids.length) {
+      toast(`${n(ids.length)} پیام از ${n(total)} پیام مطابق فیلتر انتخاب شد.`);
+    }
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = oldText;
+  }
 }
 
 function clearMessageSelection() {
@@ -976,19 +1895,35 @@ async function analyzeSelectedMessages() {
   button.disabled = true;
   button.textContent = "در حال تحلیل…";
   try {
-    const result = await api("/admin/api/messages/analyze", {
-      method: "POST",
-      body: JSON.stringify({message_ids: ids}),
-    });
+    const chunkSize = 200;
+    let succeeded = 0;
+    let failed = 0;
+    let skippedDuplicates = 0;
+    let parallelism = 0;
+    for (let index = 0; index < ids.length; index += chunkSize) {
+      const batch = ids.slice(index, index + chunkSize);
+      button.textContent = `در حال تحلیل ${n(index + 1)} تا ${n(Math.min(index + batch.length, ids.length))} از ${n(ids.length)}…`;
+      const result = await api("/admin/api/messages/analyze", {
+        method: "POST",
+        body: JSON.stringify({message_ids: batch}),
+      });
+      succeeded += Number(result.succeeded || 0);
+      failed += Number(result.failed || 0);
+      skippedDuplicates += Number(result.skipped_duplicates || 0);
+      parallelism = Math.max(parallelism, Number(result.parallelism || 0));
+    }
     state.selectedMessages.clear();
     await loadStream();
-    const parallelNote = Number(result.parallelism || 0) > 1
-      ? ` با ${n(result.parallelism)} درخواست هم‌زمان`
+    const parallelNote = parallelism > 1
+      ? ` با ${n(parallelism)} درخواست هم‌زمان`
       : "";
-    const message = result.failed
-      ? `${n(result.succeeded)} پیام${parallelNote} تحلیل شد و ${n(result.failed)} پیام خطا داشت.`
-      : `تحلیل ${n(result.succeeded)} پیام${parallelNote} ذخیره شد و در نهایی‌سازی در دسترس است.`;
-    toast(message, Boolean(result.failed));
+    const duplicateNote = skippedDuplicates
+      ? ` ${n(skippedDuplicates)} خبر تکراری کنار گذاشته شد.`
+      : "";
+    const message = failed
+      ? `${n(succeeded)} پیام${parallelNote} تحلیل شد و ${n(failed)} پیام خطا داشت.${duplicateNote}`
+      : `تحلیل ${n(succeeded)} پیام${parallelNote} ذخیره شد و در نهایی‌سازی در دسترس است.${duplicateNote}`;
+    toast(message, Boolean(failed));
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -1035,9 +1970,14 @@ async function openMessage(id, allowSpeakerCorrection = false) {
         </div>
         <button type="submit" class="primary-button">تأیید اصلاح گوینده</button>
       </form>` : "";
+    const detailText = String(item.text || item.caption || "").trim();
+    const detailCopy = detailText
+      ? `<div class="detail-text">${esc(detailText)}</div>`
+      : (messageMediaItems(item).length ? "" : `<div class="detail-text">[پیام بدون متن]</div>`);
     // Text first, then editorial details. Raw metadata/analysis JSON stays hidden from operators.
     $("messageDetail").innerHTML = `
-      <div class="detail-text">${esc(item.text || item.caption || "[پیام بدون متن]")}</div>
+      ${renderMessageMedia(item)}
+      ${detailCopy}
       <div class="detail-links">${publicPostLink}${links.map(([label, link]) => `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(label)} ↗</a>`).join("")}<button type="button" class="outline-button" onclick="searchMessageInGoogle(${Number(id)})">جست‌وجوی کامل متن در گوگل</button></div>
       <div class="detail-grid">
         <div class="detail-field"><small>منبع</small>${esc(item.source_chat_title || item.source_chat_username || item.source_chat_id)}</div>
@@ -1119,6 +2059,12 @@ async function loadFinalizationWorkspace() {
 }
 
 function renderFinalizationView() {
+  if (isQuickStartWorkspace()) {
+    $("finalizationRangeView")?.classList.add("hidden");
+    $("finalizationDeskView")?.classList.remove("hidden");
+    $("finalizationDrafts")?.classList.remove("hidden");
+    return;
+  }
   const wanted = state.finalizationView === "drafts"
     ? "finalizationDrafts"
     : (state.finalizationStage === "desk" && state.finalizationWindowConfirmed
@@ -1128,15 +2074,14 @@ function renderFinalizationView() {
     element.classList.toggle("hidden", element.id !== wanted);
   });
   if (wanted === "finalizationDeskView") {
-    const dateFrom = combineJalaliDateTime("finalizationDateFrom", "finalizationTimeFrom");
-    const dateTo = combineJalaliDateTime("finalizationDateTo", "finalizationTimeTo");
-    $("finalizationDeskHint").textContent = `بازهٔ فعال: ${dateFrom || "—"} تا ${dateTo || "—"}. فهرست زیر فقط از همین بازه ساخته شده است.`;
+    const dateFrom = $("finalizationDateFrom")?.value.trim() || "—";
+    const timeFrom = faDigits(clock24($("finalizationTimeFrom")?.value || "") || "00:00");
+    const dateTo = $("finalizationDateTo")?.value.trim() || dateFrom;
+    const timeTo = faDigits(clock24($("finalizationTimeTo")?.value || "") || "23:59");
+    $("finalizationDeskHint").textContent = `بازهٔ فعال: ${dateFrom} ${timeFrom} تا ${dateTo} ${timeTo}. فهرست زیر فقط از همین بازه ساخته شده است.`;
   }
 }
 
-async function loadAutomationWorkspace() {
-  await Promise.all([loadEditorialAutomation(), loadHumanControl(), loadSources(true)]);
-}
 
 function renderFinalizationProgress(progress) {
   const panel = $("finalizationProgress");
@@ -1169,10 +2114,10 @@ async function loadAnalysisFilters() {
   const previousEvent = $("finalizationEvent").value;
   const previousGeneral = $("finalizationGeneralTopic").value;
   const previousSpecific = $("finalizationSpecificTopic").value;
-  const dateFrom = combineJalaliDateTime("finalizationDateFrom", "finalizationTimeFrom");
-  const dateTo = combineJalaliDateTime("finalizationDateTo", "finalizationTimeTo");
+  const dateFrom = $("finalizationDateFrom").value.trim();
+  const dateTo = $("finalizationDateTo").value.trim() || dateFrom;
   if (!dateFrom || !dateTo) throw new Error("روز و ساعت شروع و پایان بازه را وارد کنید.");
-  const params = new URLSearchParams({date_from_jalali: dateFrom, date_to_jalali: dateTo, timezone: "Asia/Tehran"});
+  const params = jalaliWindowParams("finalizationDateFrom", "finalizationTimeFrom", "finalizationDateTo", "finalizationTimeTo");
   state.analysisFilters = await api(`/admin/api/analysis/filters?${params}`);
   $("finalizationSpeaker").innerHTML =
     `<option value="">ابتدا یک گوینده انتخاب کنید</option>`
@@ -1213,7 +2158,8 @@ async function loadAnalysisFilters() {
   ["finalizationSpeaker", "finalizationEvent", "finalizationGeneralTopic", "finalizationSpecificTopic"].forEach((id) => { $(id).disabled = false; });
   state.finalizationWindowConfirmed = true;
   state.finalizationStage = "desk";
-  $("finalizationWindowHint").textContent = "بازه تأیید شد؛ گویندگان، تگ‌ها و رویدادهای مستقل فقط از همین بازه نمایش داده می‌شوند.";
+  $("finalizationWindowHint").textContent = "بازه تأیید شد.";
+  $("finalizationWindowHint").hidden = false;
   renderFinalizationProgress(state.analysisFilters.progress);
   await loadAnalyzedMessages();
   renderFinalizationView();
@@ -1231,11 +2177,11 @@ function invalidateFinalizationWindow() {
   $("finalizationEvent").innerHTML = `<option value="">ابتدا بازه را تأیید کنید</option>`;
   $("finalizationGeneralTopic").innerHTML = `<option value="">همه موضوعات کلی</option>`;
   $("finalizationSpecificTopic").innerHTML = `<option value="">همه موضوعات مشخص</option>`;
-  $("finalizationWindowHint").textContent = "ابتدا روز و ساعت بازه را تعیین و تأیید کنید؛ سپس فهرست اشخاص همان بازه نمایش داده می‌شود.";
-  hideQuickRegistryPrompt();
+  $("finalizationWindowHint").textContent = "";
+  $("finalizationWindowHint").hidden = true;
+  hideDeskIdentityCard();
   renderFinalizationProgress(null);
-  resetDeskSubjectEditorTouch();
-  hideDeskSubjectEditor();
+  resetDeskIdentity();
   renderAnalyzedMessages();
   if (state.page === "finalization" && state.finalizationView === "workbench") renderFinalizationView();
 }
@@ -1265,93 +2211,435 @@ function combineJalaliDateTime(dateId, timeId) {
   return date ? `${date}${time ? ` ${time}` : ""}` : "";
 }
 
+function deskIdentityAction() {
+  return $("deskIdentityAction")?.value || "";
+}
+
+function setDeskIdentityAction(action) {
+  if ($("deskIdentityAction")) $("deskIdentityAction").value = action || "";
+}
+
+function setDeskIdentityStatus(message = "") {
+  const hint = $("deskIdentityStatus");
+  if (hint) hint.textContent = message;
+}
+
+function personInitials(name) {
+  return String(name || "؟").trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("") || "؟";
+}
+
+function personAvatarMarkup(person, name) {
+  const label = person?.full_name || name || "؟";
+  const id = person?.person_id;
+  const img = id ? `<img src="/admin/portraits/${id}" alt="" onerror="this.remove()">` : "";
+  return `${img}<i>${esc(personInitials(label))}</i>`;
+}
+
+function showDeskSection(id, visible) {
+  $(id)?.classList.toggle("hidden", !visible);
+}
+
+function hideDeskIdentityCard() {
+  $("deskIdentityCard")?.classList.add("hidden");
+  closeDeskPersonOptions();
+}
+
 function hideQuickRegistryPrompt() {
-  $("detectedPersonRegistryPrompt").classList.add("hidden");
-  $("quickRegistryPersonForm").dataset.tagId = "";
+  hideDeskIdentityCard();
 }
 
 function hideDeskSubjectEditor() {
-  $("deskSubjectEditor").classList.add("hidden");
-  $("deskPersonFields").classList.add("hidden");
-  $("deskEventFields").classList.add("hidden");
+  hideDeskIdentityCard();
 }
 
-function renderDeskSubjectEditor() {
-  const speaker = $("finalizationSpeaker").value;
-  const eventMessageId = Number($("finalizationEvent").value) || null;
+function registryPeople() {
+  return (state.people || []).filter((item) => Number(item.active) !== 0);
+}
+
+function closeDeskPersonOptions() {
+  $("deskPersonOptions")?.classList.add("hidden");
+}
+
+function detectedSpeakerTag() {
+  const speaker = $("finalizationSpeaker")?.value;
+  return state.analyzedMessages
+    .flatMap((item) => (item.tags || []).map((tag) => ({...tag, message_id: item.id})))
+    .find((tag) => tag.speaker_name === speaker) || null;
+}
+
+function analyzedSpeakerPosition() {
+  const counts = new Map();
+  for (const item of state.analyzedMessages) {
+    for (const tag of item.tags || []) {
+      const position = String(tag.speaker_position || "").trim();
+      if (position && position !== "نامشخص") counts.set(position, (counts.get(position) || 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "";
+}
+
+function splitAliasList(value) {
+  return String(value || "").split("|").map((item) => item.trim()).filter(Boolean);
+}
+
+function currentDeskPerson(speaker) {
+  if (state.deskIdentityOverride) return state.deskIdentityOverride;
+  const person = findPersonBySpeakerName(speaker);
+  if (person && Number(person.active) !== 0) return person;
+  return null;
+}
+
+function fillKnownIdentity(person, extras = {}) {
+  const name = person.full_name || extras.name || "";
+  const position = extras.position || person.position || "";
+  const category = extras.category || person.category || "";
+  if ($("deskPersonMode")) $("deskPersonMode").value = person.person_id ? "existing" : "new";
+  if ($("deskPersonId")) $("deskPersonId").value = person.person_id ? String(person.person_id) : "";
+  if ($("deskPersonName")) $("deskPersonName").value = name;
+  if ($("deskPersonPosition") && !$("deskPersonPosition").dataset.touched) $("deskPersonPosition").value = position;
+  if ($("deskPersonCategory") && !$("deskPersonCategory").dataset.touched) {
+    fillPersonCategorySelects(category);
+    $("deskPersonCategory").value = category;
+  }
+  if ($("deskIdentityKnownName")) $("deskIdentityKnownName").textContent = name;
+  if ($("deskIdentityKnownMeta")) {
+    $("deskIdentityKnownMeta").textContent = [position, category].filter(Boolean).join(" · ") || "بدون سمت ثبت‌شده";
+  }
+  if ($("deskIdentityAvatar")) $("deskIdentityAvatar").innerHTML = personAvatarMarkup(person, name);
+}
+
+function renderDeskPersonOptions(query = "") {
+  const box = $("deskPersonOptions");
+  if (!box) return;
+  const needle = String(query || "").trim().toLowerCase();
+  const people = registryPeople().filter((item) => {
+    if (!needle) return true;
+    const hay = `${item.full_name} ${item.position || ""} ${item.category || ""} ${item.aliases || ""}`.toLowerCase();
+    return hay.includes(needle);
+  });
+  const selectedId = $("deskPersonId")?.value || "";
+  const selectedNew = $("deskPersonMode")?.value === "new";
+  const includeNew = deskIdentityAction() === "replace";
+  const newOption = includeNew
+    ? `<button type="button" class="desk-combobox-option desk-combobox-new ${selectedNew ? "active" : ""}" data-desk-person="new">شخص جدید</button>`
+    : "";
+  box.innerHTML = [
+    newOption,
+    ...people.slice(0, 50).map((item) => `
+      <button type="button" class="desk-combobox-option ${String(item.person_id) === selectedId ? "active" : ""}" data-desk-person="${item.person_id}">
+        <span class="person-avatar"><img src="/admin/portraits/${item.person_id}" alt="" onerror="this.remove()"><i>${esc(personInitials(item.full_name))}</i></span>
+        <span><b>${esc(item.full_name)}</b><small>${esc([item.position, item.category].filter(Boolean).join(" · ") || "بدون سمت")}</small></span>
+      </button>`),
+  ].join("");
+  box.classList.remove("hidden");
+  box.querySelectorAll("[data-desk-person]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      applyDeskPersonChoice(button.dataset.deskPerson, {fromUser: true});
+    });
+  });
+}
+
+function applyDeskPersonChoice(value, {fromUser = true} = {}) {
+  const search = $("deskPersonSearch");
+  if (fromUser && search) search.dataset.touched = "1";
+  if (value === "new") {
+    $("deskPersonMode").value = "new";
+    $("deskPersonId").value = "";
+    if (search) search.value = "شخص جدید";
+    showDeskSection("deskNewPersonBox", true);
+    showDeskSection("deskPersonMetaFields", true);
+    if ($("deskNewPersonName") && !$("deskNewPersonName").dataset.touched) {
+      $("deskNewPersonName").value = $("finalizationSpeaker")?.value || "";
+    }
+    $("deskPersonName").value = $("deskNewPersonName")?.value.trim() || "";
+  } else {
+    const person = registryPeople().find((item) => String(item.person_id) === String(value));
+    if (!person) return;
+    $("deskPersonMode").value = "existing";
+    $("deskPersonId").value = String(person.person_id);
+    $("deskPersonName").value = person.full_name;
+    if (search) search.value = person.full_name;
+    showDeskSection("deskNewPersonBox", false);
+    showDeskSection("deskPersonMetaFields", true);
+    if ($("deskPersonPosition") && !$("deskPersonPosition").dataset.touched) {
+      $("deskPersonPosition").value = person.position || "";
+    }
+    if ($("deskPersonCategory") && !$("deskPersonCategory").dataset.touched) {
+      fillPersonCategorySelects(person.category || "");
+      $("deskPersonCategory").value = person.category || "";
+    }
+  }
+  closeDeskPersonOptions();
+  if (fromUser) setDeskIdentityStatus("برای ذخیره، ثبت را بزنید.");
+}
+
+function renderDeskIdentityCard() {
+  const card = $("deskIdentityCard");
+  const speaker = $("finalizationSpeaker")?.value || "";
+  const eventMessageId = Number($("finalizationEvent")?.value) || null;
+  if (!card) return;
   if (!state.finalizationWindowConfirmed || (!speaker && !eventMessageId)) {
-    hideDeskSubjectEditor();
+    hideDeskIdentityCard();
     return;
   }
-  $("deskSubjectEditor").classList.remove("hidden");
+  card.classList.remove("hidden");
+  const action = deskIdentityAction();
+  const tag = detectedSpeakerTag();
+  if ($("deskIdentityTagId")) $("deskIdentityTagId").value = String(tag?.tag_id || "");
+  if ($("deskIdentityMessageId")) $("deskIdentityMessageId").value = String(tag?.message_id || "");
+
   if (eventMessageId) {
     const row = state.analyzedMessages.find((item) => Number(item.id) === eventMessageId) || state.analyzedMessages[0];
     const event = row?.event || {};
-    $("deskSubjectHeading").textContent = "اصلاح مشخصات رویداد";
-    $("deskSubjectHint").textContent = "عنوان، محل و زمان رویداد را پیش از تدوین هر پیام بازبینی و در صورت نیاز اصلاح کنید.";
-    $("deskPersonFields").classList.add("hidden");
-    $("deskEventFields").classList.remove("hidden");
-    if (!$("deskEventTitle").dataset.touched) {
+    $("deskIdentityEyebrow").textContent = "رویداد این خبر";
+    $("deskIdentityHeading").textContent = event.title || row?.analysis_event_title || row?.analysis_main_subject || "رویداد";
+    $("deskIdentityHint").textContent = "عنوان، محل و زمان را در صورت نیاز همین‌جا اصلاح کنید. ساخت پیش‌نویس نیاز به ثبت جداگانه ندارد.";
+    showDeskSection("deskIdentityKnown", false);
+    showDeskSection("deskIdentityChoices", false);
+    showDeskSection("deskIdentityForm", false);
+    showDeskSection("deskEventFields", true);
+    if ($("deskEventTitle") && !$("deskEventTitle").dataset.touched) {
       $("deskEventTitle").value = event.title || row?.analysis_event_title || row?.analysis_main_subject || "";
     }
-    if (!$("deskEventLocation").dataset.touched) {
+    if ($("deskEventLocation") && !$("deskEventLocation").dataset.touched) {
       $("deskEventLocation").value = event.location || row?.analysis_event_location || "";
     }
-    if (!$("deskEventTime").dataset.touched) {
+    if ($("deskEventTime") && !$("deskEventTime").dataset.touched) {
       $("deskEventTime").value = event.time || row?.analysis_event_time || "";
     }
     return;
   }
+
+  showDeskSection("deskEventFields", false);
   const speakerRecord = (state.analysisFilters.speakers || []).find((item) => item.speaker_name === speaker);
-  const person = state.people.find((item) => item.full_name === speaker);
-  const tags = state.analyzedMessages.flatMap((item) => item.tags || []);
-  const positionCounts = new Map();
-  for (const tag of tags) {
-    const position = String(tag.speaker_position || "").trim();
-    if (position && position !== "نامشخص") positionCounts.set(position, (positionCounts.get(position) || 0) + 1);
+  const person = currentDeskPerson(speaker);
+  const analyzedPosition = analyzedSpeakerPosition();
+  $("deskIdentityEyebrow").textContent = "گوینده این خبرها";
+
+  if (!action && person) {
+    $("deskIdentityHeading").textContent = person.full_name;
+    $("deskIdentityHint").textContent = state.deskIdentityOverride
+      ? "برای این خبرها این گوینده انتخاب شده است. ساخت پیش‌نویس آزاد است."
+      : "در شناسنامه است. اگر تشخیص مدل غلط بوده، «این شخص نیست» را بزنید.";
+    fillKnownIdentity(person, {position: analyzedPosition || person.position, category: person.category});
+    showDeskSection("deskIdentityKnown", true);
+    showDeskSection("deskIdentityChoices", false);
+    showDeskSection("deskIdentityForm", false);
+    return;
   }
-  const analyzedPosition = [...positionCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "";
-  $("deskSubjectHeading").textContent = "اصلاح مشخصات گوینده";
-  $("deskSubjectHint").textContent = "نام، سمت و دستهٔ فرد انتخاب‌شده را اصلاح کنید؛ سپس برای هر پیام دکمهٔ مناسب را بزنید.";
-  $("deskEventFields").classList.add("hidden");
-  $("deskPersonFields").classList.remove("hidden");
-  if (!$("deskPersonName").dataset.touched) $("deskPersonName").value = speaker || "";
-  if (!$("deskPersonPosition").dataset.touched) {
+
+  if (!action) {
+    $("deskIdentityHeading").textContent = speaker;
+    $("deskIdentityHint").textContent = "این نام در شناسنامه نیست. می‌توانید پیش‌نویس را بسازید، یا هویت را همین‌جا کامل کنید.";
+    $("deskPersonMode").value = "new";
+    $("deskPersonId").value = "";
+    $("deskPersonName").value = speaker;
+    showDeskSection("deskIdentityKnown", false);
+    showDeskSection("deskIdentityChoices", true);
+    showDeskSection("deskIdentityForm", false);
+    return;
+  }
+
+  showDeskSection("deskIdentityKnown", false);
+  showDeskSection("deskIdentityChoices", false);
+  showDeskSection("deskIdentityForm", true);
+  const creating = action === "create" || (action === "replace" && $("deskPersonMode")?.value === "new");
+  showDeskSection("deskNewPersonBox", creating);
+  showDeskSection("deskPersonComboboxWrap", action === "match" || action === "replace");
+  showDeskSection("deskPersonMetaFields", true);
+  if (action === "create") {
+    $("deskIdentityHeading").textContent = "افزودن به شناسنامه";
+    $("deskIdentityHint").textContent = "نام، سمت و دسته را بررسی کنید و ثبت کنید.";
+    $("deskPersonMode").value = "new";
+    if ($("deskNewPersonName") && !$("deskNewPersonName").dataset.touched) $("deskNewPersonName").value = speaker;
+    $("deskPersonName").value = $("deskNewPersonName")?.value.trim() || speaker;
+    if ($("confirmDeskIdentity")) $("confirmDeskIdentity").textContent = canManagePeople() ? "افزودن به شناسنامه" : "ادامه با همین نام";
+  } else if (action === "match") {
+    $("deskIdentityHeading").textContent = "تطبیق با فرد موجود";
+    $("deskIdentityHint").textContent = "فرد درست را پیدا کنید. نام تشخیص‌داده‌شده به‌عنوان نام دیگر ذخیره می‌شود.";
+    if ($("confirmDeskIdentity")) $("confirmDeskIdentity").textContent = "تطبیق و ادامه";
+  } else {
+    $("deskIdentityHeading").textContent = "انتخاب گوینده درست";
+    $("deskIdentityHint").textContent = "فرد درست را از شناسنامه انتخاب کنید یا شخص جدید بسازید. این انتخاب برای پیش‌نویس همین خبرها استفاده می‌شود.";
+    if ($("confirmDeskIdentity")) $("confirmDeskIdentity").textContent = "ادامه با این فرد";
+  }
+  if ($("deskPersonPosition") && !$("deskPersonPosition").dataset.touched) {
     $("deskPersonPosition").value = analyzedPosition || person?.position || speakerRecord?.position || "";
   }
-  if (!$("deskPersonCategory").dataset.touched) {
+  if ($("deskPersonCategory") && !$("deskPersonCategory").dataset.touched) {
+    fillPersonCategorySelects(person?.category || "");
     $("deskPersonCategory").value = person?.category || "";
   }
 }
 
-function resetDeskSubjectEditorTouch() {
-  ["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime"].forEach((id) => {
+function renderDeskSubjectEditor() {
+  renderDeskIdentityCard();
+}
+
+function resetDeskIdentity() {
+  [
+    "deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation",
+    "deskEventTime", "deskNewPersonName", "deskPersonSearch", "deskPersonId", "deskPersonMode",
+    "deskIdentityAction", "deskPersonAliases", "deskIdentityTagId", "deskIdentityMessageId",
+  ].forEach((id) => {
     const field = $(id);
     if (!field) return;
     delete field.dataset.touched;
-    field.value = "";
+    if (field.type === "hidden" || field.tagName === "INPUT" || field.tagName === "SELECT") field.value = "";
   });
+  state.deskSubjectConfirmed = false;
+  state.deskIdentityOverride = null;
+  closeDeskPersonOptions();
+  setDeskIdentityStatus("");
+}
+
+function resetDeskSubjectEditorTouch() {
+  resetDeskIdentity();
+}
+
+function canManagePeople() {
+  return (state.me?.permissions || []).some((permission) => permission === "*" || permission === "people.manage");
+}
+
+async function promoteDetectedSpeaker(category) {
+  const messageId = Number($("deskIdentityMessageId")?.value);
+  const tagId = Number($("deskIdentityTagId")?.value);
+  if (!messageId || !tagId || !canManagePeople()) return null;
+  try {
+    return await api(`/admin/api/analysis/messages/${messageId}/speakers/${tagId}/promote-person`, {
+      method: "POST",
+      body: JSON.stringify({category: category || null}),
+    });
+  } catch (error) {
+    toast(error.message, true);
+    return null;
+  }
+}
+
+function openDeskIdentityAction(action) {
+  setDeskIdentityAction(action);
+  setDeskIdentityStatus("");
+  if (action === "replace") {
+    $("deskPersonMode").value = "";
+    $("deskPersonId").value = "";
+    if ($("deskPersonSearch")) $("deskPersonSearch").value = "";
+  }
+  if (action === "match") {
+    $("deskPersonMode").value = "";
+    $("deskPersonId").value = "";
+    if ($("deskPersonSearch")) $("deskPersonSearch").value = "";
+    showDeskSection("deskNewPersonBox", false);
+  }
+  renderDeskIdentityCard();
+  if (action === "match" || action === "replace") {
+    $("deskPersonSearch")?.focus();
+  } else {
+    $("deskNewPersonName")?.focus();
+  }
+}
+
+function cancelDeskIdentity() {
+  setDeskIdentityAction("");
+  setDeskIdentityStatus("");
+  if ($("deskPersonSearch")) $("deskPersonSearch").value = "";
+  renderDeskIdentityCard();
+}
+
+async function confirmDeskIdentity() {
+  const action = deskIdentityAction();
+  const speaker = $("finalizationSpeaker")?.value || "";
+  const mode = $("deskPersonMode")?.value;
+  const position = $("deskPersonPosition")?.value.trim() || "";
+  const category = $("deskPersonCategory")?.value.trim() || "";
+  const aliases = splitAliasList($("deskPersonAliases")?.value);
+  try {
+    if (action === "create" || (action === "replace" && mode === "new")) {
+      const name = $("deskNewPersonName")?.value.trim() || speaker;
+      if (!name) return toast("نام را وارد کنید.", true);
+      $("deskPersonName").value = name;
+      let person = {full_name: name, position, category, person_id: null};
+      if (canManagePeople()) {
+        const extraAliases = [...aliases];
+        if (speaker && speaker !== name) extraAliases.push(speaker);
+        const saved = await api("/admin/api/people", {
+          method: "POST",
+          body: JSON.stringify({
+            full_name: name,
+            position: position || null,
+            category: category || null,
+            registry_status: "inside",
+            active: true,
+            aliases: extraAliases,
+            replace_aliases: true,
+          }),
+        });
+        await promoteDetectedSpeaker(category);
+        await loadReferenceData();
+        person = state.people.find((item) => Number(item.person_id) === Number(saved.person_id)) || {...person, person_id: saved.person_id};
+      }
+      state.deskIdentityOverride = person;
+      setDeskIdentityAction("");
+      renderDeskIdentityCard();
+      toast(canManagePeople() ? "شخص در شناسنامه ثبت شد." : "مشخصات برای پیش‌نویس ثبت شد.");
+      return;
+    }
+    if (action === "match") {
+      const personId = Number($("deskPersonId")?.value);
+      const person = state.people.find((item) => Number(item.person_id) === personId);
+      if (!person) return toast("یک فرد از شناسنامه انتخاب کنید.", true);
+      if (canManagePeople()) {
+        const merged = [...new Set([...splitAliasList(person.aliases), speaker, ...aliases].filter(Boolean))];
+        await api("/admin/api/people", {
+          method: "POST",
+          body: JSON.stringify({
+            person_id: personId,
+            full_name: person.full_name,
+            position: position || person.position || null,
+            category: category || person.category || null,
+            registry_status: person.registry_status || "inside",
+            active: Number(person.active) !== 0,
+            aliases: merged,
+            replace_aliases: true,
+            priority: Number(person.priority || 100),
+          }),
+        });
+        await promoteDetectedSpeaker(category || person.category);
+        await loadReferenceData();
+      }
+      state.deskIdentityOverride = state.people.find((item) => Number(item.person_id) === personId) || person;
+      setDeskIdentityAction("");
+      renderDeskIdentityCard();
+      toast(canManagePeople() ? "تطبیق با شناسنامه انجام شد." : "این فرد برای پیش‌نویس انتخاب شد.");
+      return;
+    }
+    if (action === "replace") {
+      const personId = Number($("deskPersonId")?.value);
+      const person = state.people.find((item) => Number(item.person_id) === personId);
+      if (!person) return toast("گوینده درست را از شناسنامه انتخاب کنید.", true);
+      $("deskPersonName").value = person.full_name;
+      $("deskPersonId").value = String(person.person_id);
+      $("deskPersonMode").value = "existing";
+      state.deskIdentityOverride = {
+        ...person,
+        position: position || person.position,
+        category: category || person.category,
+      };
+      setDeskIdentityAction("");
+      renderDeskIdentityCard();
+      toast("گوینده پیش‌نویس به این فرد تغییر کرد.");
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function confirmDeskSubject() {
+  return confirmDeskIdentity();
 }
 
 function renderQuickRegistryPrompt() {
-  const speaker = $("finalizationSpeaker").value;
-  const canManagePeople = (state.me?.permissions || []).some((permission) => permission === "*" || permission === "people.manage");
-  const speakerRecord = (state.analysisFilters.speakers || []).find((item) => item.speaker_name === speaker);
-  const tags = state.analyzedMessages.flatMap((item) => (item.tags || []).map((tag) => ({...tag, message_id: item.id})));
-  const candidate = tags.find((tag) => tag.speaker_name === speaker);
-  const knownInside = state.people.some((person) => person.full_name === speaker && person.registry_status === "inside" && Number(person.active) !== 0);
-  if (!speaker || speaker === "نامشخص" || !candidate || knownInside || !canManagePeople) {
-    hideQuickRegistryPrompt();
-    return;
-  }
-  $("quickRegistryDetectedName").textContent = speaker;
-  $("quickRegistryPersonName").value = speaker;
-  $("quickRegistryPersonPosition").value = candidate.speaker_position || speakerRecord?.position || "";
-  $("quickRegistryPersonCategory").value = "";
-  $("quickRegistryPersonAliases").value = "";
-  $("quickRegistrySourceMessageId").value = String(candidate.message_id || "");
-  $("quickRegistryPersonForm").dataset.tagId = String(candidate.tag_id || "");
-  $("detectedPersonRegistryPrompt").classList.remove("hidden");
+  renderDeskIdentityCard();
 }
 
 function uniqueTagValues(tags, field) {
@@ -1370,13 +2658,14 @@ function renderBulletinCandidate(draft = state.currentDraft) {
   const put = (id, value) => { $(id).textContent = value || "—"; };
   put("candidatePersonName", isEvent ? (event.title || draft?.event_title || draft?.title) : (person.name || draft?.person_name));
   put("candidatePersonPosition", isEvent ? "رویداد مستقل" : (person.position || draft?.position));
-  put("candidateCategory", isEvent ? "رویدادهای مهم ایران و جهان" : (fields.category_name || draft?.category_name || person.category));
+  put("candidateCategory", isEvent ? "وقایع و رویدادهای مهم ایران و جهان" : (fields.category_name || draft?.category_name || person.category));
   put("candidateGeneralTopic", generalTopics.join("، ") || topic.name || draft?.topic_name);
   put("candidateMainSubject", fields.main_subject || draft?.main_subject);
   put("candidateSpecificTopic", specificTopics.join("، "));
   put("candidateSummaryParagraph", fields.summary_paragraph || draft?.summary_paragraph);
   put("candidateSummarySentence", fields.summary_sentence || draft?.summary_sentence);
   put("candidateSummaryTitle", fields.detail || draft?.detail || fields.summary_title || draft?.summary_title);
+  put("candidateFootnote", fields.footnote || draft?.footnote);
   $("bulletinCandidateTitle").textContent = draft?.title || "خروجی آماده برای نهایی‌سازی";
   const status = draft?.status || "draft";
   $("bulletinCandidateStatus").textContent = statusLabel(status);
@@ -1394,7 +2683,8 @@ function refreshCurrentCandidatePreview() {
     summary_paragraph: $("summaryParagraph").value.trim(),
     summary_sentence: $("summarySentence").value.trim(),
     summary_title: $("summaryTitle").value.trim(), detail: $("summaryTitle").value.trim(),
-    bulletin_fields: {...(state.currentDraft.bulletin_fields || {}), main_subject: $("mainSubject").value.trim(), detail: $("summaryTitle").value.trim(), category_name: $("draftCategory").value.trim()},
+    footnote: $("deskFootnote")?.value.trim() || "",
+    bulletin_fields: {...(state.currentDraft.bulletin_fields || {}), main_subject: $("mainSubject").value.trim(), detail: $("summaryTitle").value.trim(), category_name: $("draftCategory").value.trim(), footnote: $("deskFootnote")?.value.trim() || ""},
   };
   renderBulletinCandidate(preview);
 }
@@ -1405,8 +2695,7 @@ async function loadAnalyzedMessages() {
   if (!state.finalizationWindowConfirmed || (!speaker && !eventMessageId)) {
     state.analyzedMessages = [];
     state.selectedAnalyzedMessages.clear();
-    hideQuickRegistryPrompt();
-    hideDeskSubjectEditor();
+    hideDeskIdentityCard();
     renderAnalyzedMessages();
     return;
   }
@@ -1415,16 +2704,13 @@ async function loadAnalyzedMessages() {
   if (eventMessageId) params.set("event_message_id", String(eventMessageId));
   if ($("finalizationGeneralTopic").value) params.set("general_topic", $("finalizationGeneralTopic").value);
   if ($("finalizationSpecificTopic").value) params.set("specific_topic", $("finalizationSpecificTopic").value);
-  const dateFrom = combineJalaliDateTime("finalizationDateFrom", "finalizationTimeFrom");
-  const dateTo = combineJalaliDateTime("finalizationDateTo", "finalizationTimeTo");
-  if (dateFrom) params.set("date_from_jalali", dateFrom);
-  if (dateTo) params.set("date_to_jalali", dateTo);
+  const windowParams = jalaliWindowParams("finalizationDateFrom", "finalizationTimeFrom", "finalizationDateTo", "finalizationTimeTo");
+  windowParams.forEach((value, key) => params.set(key, value));
   const rows = await api(`/admin/api/analysis/messages?${params}`);
   state.analyzedMessages = groupAnalyzedMessages(rows);
   state.analyzedMessages.forEach((item) => state.messageSearchTexts.set(Number(item.id), String(item.text || item.caption || "").trim()));
   state.selectedAnalyzedMessages = new Set(state.analyzedMessages.map((item) => Number(item.id)));
-  renderQuickRegistryPrompt();
-  renderDeskSubjectEditor();
+  renderDeskIdentityCard();
   renderAnalyzedMessages();
 }
 
@@ -1440,8 +2726,8 @@ function renderAnalyzedMessages() {
     ? "ابتدا بازهٔ روز و ساعت را تأیید کنید."
     : selectionLabel
     ? isEvent
-      ? "ابتدا مشخصات رویداد را اصلاح کنید؛ سپس برای همین پیام «تدوین پیام» را بزنید."
-      : `ابتدا مشخصات گوینده را اصلاح کنید؛ سپس برای هر پیام اقدام جداگانه انجام دهید. ${n(state.selectedAnalyzedMessages.size)} از ${n(rows.length)} خبر انتخاب شده است.`
+      ? "عنوان و جزئیات رویداد را در کارت بالا در صورت نیاز اصلاح کنید؛ سپس «تدوین پیام» را بزنید."
+      : `${n(state.selectedAnalyzedMessages.size)} از ${n(rows.length)} خبر انتخاب شده است. ساخت پیش‌نویس آزاد است.`
     : "یک گوینده یا رویداد را انتخاب کنید.";
   $("analyzedMessageList").innerHTML = !selectionLabel
     ? `<div class="empty-mini">برای مشاهده خبرها، یک گوینده یا یک رویداد مستقل را از فیلتر بالا انتخاب کنید.</div>`
@@ -1532,7 +2818,8 @@ async function createDraftFromAnalysis(options = {}) {
   const deskEventTitle = $("deskEventTitle")?.value.trim() || "";
   const deskEventLocation = $("deskEventLocation")?.value.trim() || "";
   const deskEventTime = $("deskEventTime")?.value.trim() || "";
-  const deskPersonName = $("deskPersonName")?.value.trim() || speakerFilter;
+  const deskPersonId = Number($("deskPersonId")?.value) || null;
+  const deskPersonName = $("deskPersonName")?.value.trim() || $("deskNewPersonName")?.value.trim() || speakerFilter;
   const deskPersonPosition = $("deskPersonPosition")?.value.trim() || "";
   const deskPersonCategory = $("deskPersonCategory")?.value.trim() || "";
   const topicName = $("finalizationGeneralTopic").value
@@ -1540,7 +2827,9 @@ async function createDraftFromAnalysis(options = {}) {
     || [...topicCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0]
     || "نامشخص";
   const speakerName = isEvent ? null : (deskPersonName || speakerFilter);
-  const person = state.people.find((item) => item.full_name === speakerName);
+  const person = isEvent
+    ? null
+    : (deskPersonId ? state.people.find((item) => Number(item.person_id) === deskPersonId) : state.people.find((item) => item.full_name === speakerName));
   const topic = state.topics.find((item) => item.name === topicName);
   const positionCounts = new Map();
   for (const item of selected) {
@@ -1586,15 +2875,19 @@ async function createDraftFromAnalysis(options = {}) {
         message_inputs: messageInputs,
       }),
     });
-    state.finalizationView = "drafts";
-    renderFinalizationView();
-    history.replaceState(null, "", "#finalization:drafts");
     await loadDrafts();
     await openDraft(data.draft_id);
     requestAnimationFrame(() => {
       $("draftEditor")?.scrollIntoView({behavior: "smooth", block: "start"});
       $("generateAllSummaries")?.focus({preventScroll: true});
     });
+    if (keepQuickStartLocation()) {
+      renderFinalizationView();
+    } else {
+      state.finalizationView = "drafts";
+      renderFinalizationView();
+      history.replaceState(null, "", "#finalization:drafts");
+    }
     toast(isEvent
       ? "رویداد در انتهای صفحه باز شد. خلاصه‌ها فقط با دکمهٔ «تولید سه خلاصهٔ رویداد» ساخته می‌شوند."
       : "امکانات تدوین در انتهای صفحه باز شد. تا وقتی «تولید هر سه خلاصه» را نزنید، خلاصه‌ای تولید نمی‌شود.");
@@ -1625,12 +2918,16 @@ async function createManualDraft() {
       }),
     });
     state.selectedAnalyzedMessages.clear();
-    state.finalizationView = "drafts";
-    renderFinalizationView();
-    history.replaceState(null, "", "#finalization:drafts");
     await loadDrafts();
     await openDraft(data.draft_id);
     requestAnimationFrame(() => $("draftTitle")?.focus({preventScroll: true}));
+    if (keepQuickStartLocation()) {
+      renderFinalizationView();
+    } else {
+      state.finalizationView = "drafts";
+      renderFinalizationView();
+      history.replaceState(null, "", "#finalization:drafts");
+    }
     toast("خبر دستیِ مستقل ساخته شد؛ هیچ پیام یا متن پایه‌ای از پیش‌نویس‌های قبلی در آن وارد نشده است.");
   } catch (error) {
     toast(error.message, true);
@@ -1642,121 +2939,6 @@ async function createManualDraft() {
   }
 }
 
-function automationDate(value) {
-  return value ? fdate(value) : "—";
-}
-
-function automationLabel(value) {
-  return ({stopped: "متوقف", idle: "آماده", running: "در حال اجرا", completed: "انجام‌شده", failed: "نیازمند بررسی"})[String(value || "")] || "نامشخص";
-}
-
-function renderAutomationStatus(data) {
-  state.automation = data || {};
-  const analysisEnabled = Boolean(data?.analysis_enabled ?? data?.initial_analysis_enabled);
-  const draftsEnabled = Boolean(data?.drafts_enabled);
-  const enabledCount = Number(analysisEnabled) + Number(draftsEnabled);
-  const badge = $("automationStatusBadge");
-  badge.textContent = enabledCount === 2 ? "هر دو مرحله فعال‌اند" : (enabledCount ? "یک مرحله فعال است" : "همه مرحله‌ها متوقف‌اند");
-  badge.className = `status-pill ${enabledCount ? "approved" : "pending"}`;
-  $("analysisAutomationBadge").textContent = analysisEnabled ? "فعال" : "متوقف";
-  $("analysisAutomationBadge").className = `status-pill ${analysisEnabled ? "approved" : "pending"}`;
-  $("draftAutomationBadge").textContent = draftsEnabled ? "فعال" : "متوقف";
-  $("draftAutomationBadge").className = `status-pill ${draftsEnabled ? "approved" : "pending"}`;
-  $("startEditorialAutomation").classList.toggle("hidden", analysisEnabled);
-  $("stopEditorialAutomation").classList.toggle("hidden", !analysisEnabled);
-  $("startEditorialDraftAutomation").classList.toggle("hidden", draftsEnabled);
-  $("stopEditorialDraftAutomation").classList.toggle("hidden", !draftsEnabled);
-  $("runEditorialAnalysisNow").disabled = !analysisEnabled;
-  $("runEditorialDraftsNow").disabled = !draftsEnabled;
-  if (data?.analysis_start_at && document.activeElement !== $("analysisAutomationStartDate")) {
-    $("analysisAutomationStartDate").value = jalaliInputDate(data.analysis_start_at);
-    $("analysisAutomationStartTime").value = tehranTimeInput(data.analysis_start_at);
-  }
-  if (data?.draft_start_at && document.activeElement !== $("draftAutomationStartDate")) {
-    $("draftAutomationStartDate").value = jalaliInputDate(data.draft_start_at);
-    $("draftAutomationStartTime").value = tehranTimeInput(data.draft_start_at);
-  }
-  $("automationStatusDetails").innerHTML = `
-    <div><small>تحلیل اولیه</small><b>${automationLabel(data?.analysis_status)}</b><span>از ${esc(automationDate(data?.analysis_start_at))} · آخرین اجرا: ${esc(automationDate(data?.analysis_last_completed_at))} · ${n(data?.analysis_last_processed || 0)} پیام</span></div>
-    <div><small>پیش‌نویس خودکار</small><b>${automationLabel(data?.draft_status)}</b><span>از ${esc(automationDate(data?.draft_start_at))} · آخرین اجرا: ${esc(automationDate(data?.draft_last_completed_at))} · ${n(data?.draft_last_processed || 0)} پیش‌نویس</span></div>
-    <div><small>زمان‌بندی مستقل</small><b>هر ${n(data?.analysis_interval_minutes || 10)} دقیقه / ${n(data?.draft_interval_hours || 3)} ساعت</b><span>${data?.analysis_running || data?.draft_running ? "فرایندی در حال اجراست" : "آمادهٔ اجرای بعدی"}</span></div>`;
-}
-
-async function loadEditorialAutomation() {
-  try { renderAutomationStatus(await api("/admin/api/editorial-automation")); }
-  catch (error) { toast(error.message, true); }
-}
-
-function automationStartPayload(dateId, timeId) {
-  const date = $(dateId).value.trim();
-  const time = $(timeId).value.trim();
-  if (!date || !time) throw new Error("روز و ساعت شروع این فرایند را وارد کنید.");
-  return {start_date_jalali: date, start_time: time, timezone: "Asia/Tehran"};
-}
-
-async function editorialAutomationAction(path, message, body = null) {
-  try {
-    const result = await api(path, {method: "POST", body: body ? JSON.stringify(body) : undefined});
-    if (result.initial_analysis_enabled !== undefined) renderAutomationStatus(result);
-    else await loadEditorialAutomation();
-    toast(message || "عملیات خودکار ثبت شد.");
-    await Promise.all([loadHumanControl(), loadDrafts()]);
-  } catch (error) { toast(error.message, true); }
-}
-
-function humanControlEvidence(candidate) {
-  const evidence = Array.isArray(candidate.web_evidence) ? candidate.web_evidence : [];
-  if (!evidence.length) return `<p class="muted">برای این مورد، نتیجهٔ قابل اتکایی از جست‌وجوی بیرونی ثبت نشد؛ با متن پیام و شناسنامه بررسی کنید.</p>`;
-  return `<details class="candidate-evidence"><summary>${n(evidence.length)} شاهد جست‌وجو</summary>${evidence.map((item) => `<a href="${esc(item.url || "#")}" target="_blank" rel="noopener"><b>${esc(item.title || "نتیجه")}</b><span>${esc(item.snippet || "")}</span></a>`).join("")}</details>`;
-}
-
-async function loadHumanControl() {
-  const host = $("humanControlList");
-  if (!host) return;
-  if (!state.people.length) await loadReferenceData();
-  const candidates = await api("/admin/api/person-candidates?status=pending");
-  host.innerHTML = candidates.length ? candidates.map((candidate) => {
-    const targetOptions = [`<option value="">انتخاب شخص در شناسنامه</option>`, ...state.people.map((person) => `<option value="${person.person_id}">${esc(person.full_name)}${person.position ? ` · ${esc(person.position)}` : ""}</option>`)].join("");
-    const initialName = candidate.suggested_name || candidate.detected_name || "";
-    const kind = candidate.candidate_kind === "position_only" ? "سمت بدون نام" : "نام نیازمند تطبیق";
-    return `<article class="human-control-card">
-      <section class="human-control-message"><div class="human-control-step"><span>۱</span><b>پیام مبنا</b></div><p>${esc(candidate.sample_text || candidate.sample_caption || "متن پیام مبنا در دسترس نیست؛ با تعداد پیام‌های مرتبط و شواهد زیر بررسی کنید.")}</p><small>${n(candidate.linked_message_count || 1)} پیام مرتبط · ${esc(candidate.candidate_kind === "position_only" ? "هوش فقط سمت را تشخیص داده است" : "نامزد از تحلیل و جست‌وجو استخراج شده است")}</small></section>
-      <section class="human-control-candidate"><div class="human-control-step"><span>۲</span><b>نامزد گوینده و تصمیم</b></div><div class="human-control-copy"><span class="status-pill pending">${esc(kind)}</span><h4>${esc(initialName || "نامشخص")}</h4>
-        <p>${candidate.detected_position ? `سمت تشخیص‌شده: ${esc(candidate.detected_position)}` : "سمت مشخص نشده"}</p>
-        ${candidate.web_query ? `<p class="muted">عبارت جست‌وجو: ${esc(candidate.web_query)}</p>` : ""}${humanControlEvidence(candidate)}</div>
-      <div class="human-control-form" data-candidate="${candidate.candidate_id}">
-        <label>نام کامل برای ثبت<input id="candidateName_${candidate.candidate_id}" value="${esc(initialName)}"></label>
-        <label>سمت / سمت افزوده<input id="candidatePosition_${candidate.candidate_id}" value="${esc(candidate.detected_position || "")}"></label>
-        <label>دسته<select id="candidateCategory_${candidate.candidate_id}">${[`<option value="">انتخاب دسته</option>`, ...(state.personCategories || []).map((item) => `<option value="${esc(item)}" ${item === (candidate.category || "") ? "selected" : ""}>${esc(item)}</option>`)].join("")}</select></label>
-        <label>تطبیق با شناسنامه<select id="candidateTarget_${candidate.candidate_id}">${targetOptions}</select></label>
-        <div class="actions"><button class="blue" type="button" onclick="reviewHumanCandidate(${candidate.candidate_id},'merge')">تطبیق و تکمیل شناسنامه</button><button class="primary" type="button" onclick="reviewHumanCandidate(${candidate.candidate_id},'approve')">افزودن به شناسنامه</button><button class="danger" type="button" onclick="reviewHumanCandidate(${candidate.candidate_id},'reject')">رد پیشنهاد</button></div>
-      </div></section></article>`;
-  }).join("") : `<div class="empty-mini">موردی برای کنترل انسانی باقی نمانده است.</div>`;
-}
-
-async function reviewHumanCandidate(candidateId, action) {
-  const target = Number($(`candidateTarget_${candidateId}`).value) || null;
-  if (action === "merge" && !target) return toast("شخص مقصد را از شناسنامه انتخاب کنید.", true);
-  const body = {
-    action,
-    merge_person_id: target,
-    full_name: $(`candidateName_${candidateId}`).value.trim() || null,
-    position: $(`candidatePosition_${candidateId}`).value.trim() || null,
-    category: $(`candidateCategory_${candidateId}`).value.trim() || null,
-    add_detected_alias: true,
-    add_position: true,
-  };
-  try {
-    await api(`/admin/api/person-candidates/${candidateId}`, {method: "PATCH", body: JSON.stringify(body)});
-    toast(action === "reject" ? "پیشنهاد رد شد." : "شناسنامه و خبرهای مرتبط به‌روزرسانی شد.");
-    await Promise.all([
-      loadHumanControl(),
-      loadReferenceData(),
-      state.finalizationWindowConfirmed ? loadAnalysisFilters() : Promise.resolve(),
-      state.finalizationView === "drafts" ? loadDrafts() : Promise.resolve(),
-    ]);
-  } catch (error) { toast(error.message, true); }
-}
 
 async function loadDrafts() {
   if (!state.people.length || !state.topics.length) await loadReferenceData();
@@ -1799,6 +2981,7 @@ async function openDraft(id) {
     $("summaryParagraph").value = draft.summary_paragraph || "";
     $("summarySentence").value = draft.summary_sentence || "";
     $("summaryTitle").value = draft.detail || draft.summary_title || "";
+    if ($("deskFootnote")) $("deskFootnote").value = draft.footnote || "";
     $("summaryBlockHeading").textContent = isEvent ? "خلاصه‌های رویداد" : "خلاصه‌های گوینده";
     $("summaryBlockHint").textContent = isEvent
       ? "مدل دوم، سه خلاصهٔ خبریِ رویداد مستقل را تولید می‌کند؛ سپس نتیجه را بازبینی کنید."
@@ -1867,6 +3050,7 @@ function draftPayload() {
     main_subject: $("mainSubject").value.trim() || null,
     oration_location: $("draftLocation").value.trim() || null,
     source_url: $("draftSourceUrl").value.trim() || null,
+    footnote: $("deskFootnote")?.value.trim() || null,
     change_reason: "ویرایش از میز تدوین",
   };
 }
@@ -2001,7 +3185,9 @@ async function finalizeDraft() {
     state.finalizationView = "workbench";
     state.finalizationStage = "desk";
     renderFinalizationView();
-    history.replaceState(null, "", "#finalization:workbench");
+    if (!keepQuickStartLocation()) {
+      history.replaceState(null, "", "#finalization:workbench");
+    }
   } catch (error) { toast(error.message, true); }
 }
 
@@ -2157,9 +3343,11 @@ async function loadHighAttentionWorkspace() {
   $("highAttentionDay").innerHTML = `<option value="">انتخاب روز نهایی‌سازی</option>` + days.map((item) => `<option value="${esc(item.day)}">${esc(highAttentionDayLabel(item.day))} · ${n(item.draft_count)} خبر نهایی</option>`).join("");
   $("highAttentionDay").value = state.highAttentionDay;
   syncJalaliFlowInput("highAttentionJalaliDate", state.highAttentionDay);
-  $("highAttentionDayHint").textContent = days.length
-    ? `${n(days.length)} روز دارای خبر نهایی برای بررسی پربازتاب در دسترس است.`
-    : "روز را از تقویم انتخاب کنید یا ابتدا خبر را نهایی کنید.";
+  const hint = $("highAttentionDayHint");
+  if (hint) {
+    hint.textContent = days.length ? `${n(days.length)} روز دارای خبر نهایی` : "";
+    hint.hidden = !hint.textContent;
+  }
   await loadHighAttentionDay();
 }
 
@@ -2241,9 +3429,8 @@ async function loadBulletinHighAttentionItems() {
   container.innerHTML = !day
     ? `<div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div>`
     : state.bulletinHighAttentionItems.length ? state.bulletinHighAttentionItems.map((item) => `
-      <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title)}</b><p>${esc(item.summary)}</p></div><input class="bulletin-high-attention-check" type="checkbox" value="${item.high_attention_item_id}" onchange="updateBulletinPreview()"></label>`).join("")
+      <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title)}</b><p>${esc(item.summary)}</p></div><input class="bulletin-high-attention-check" type="checkbox" value="${item.high_attention_item_id}"></label>`).join("")
     : `<div class="empty-mini">برای این روز پربازتاب نهایی‌شده‌ای وجود ندارد.</div>`;
-  updateBulletinPreview();
 }
 
 function selectedBulletinHighAttentionItems() {
@@ -2275,25 +3462,29 @@ function renderBulletinDayPicker() {
     });
   }
   const daySelect = $("bulletinFinalizationDay");
-  daySelect.innerHTML = `<option value="">همهٔ خبرهای نهایی‌شده</option>` + days.map((item) =>
+  daySelect.innerHTML = `<option value="">انتخاب روز</option>` + days.map((item) =>
     `<option value="${esc(item.value)}">${esc(item.label)} · ${n(item.count)} خبر نهایی</option>`
   ).join("");
   daySelect.value = state.bulletinFinalizationDay;
   daySelect.disabled = false;
   syncJalaliFlowInput("bulletinJalaliDate", state.bulletinFinalizationDay);
-  $("bulletinDayHint").textContent = days.length
-    ? "برای نمایش خبرهای نهایی‌شدهٔ یک روز، روز را از فهرست یا تقویم انتخاب کنید؛ خروجی فقط از خبرهایی ساخته می‌شود که خودتان تیک زده‌اید."
-    : "روز را از تقویم انتخاب کنید یا ابتدا خبر را نهایی کنید.";
 }
 
 function renderFinalizedDraftsForDay() {
   const selectedDay = state.bulletinFinalizationDay;
   const drafts = selectedDay
     ? state.bulletinDrafts.filter((draft) => bulletinDayInfo(draft)?.value === selectedDay)
-    : state.bulletinDrafts;
+    : [];
   state.drafts = drafts;
   const toolbar = $("bulletinDraftsToolbar");
   const selectAll = $("selectAllFinalizedDrafts");
+  if (!selectedDay) {
+    toolbar?.classList.add("hidden");
+    if (selectAll) selectAll.checked = false;
+    $("bulletinDraftsSelectionHint").textContent = "";
+    $("finalizedDrafts").innerHTML = `<div class="empty-mini">روز را انتخاب کنید.</div>`;
+    return;
+  }
   if (!drafts.length) {
     toolbar?.classList.add("hidden");
     if (selectAll) selectAll.checked = false;
@@ -2306,7 +3497,6 @@ function renderFinalizedDraftsForDay() {
     : "خبر نهایی در دسترس نیست";
   $("finalizedDrafts").innerHTML = drafts.length ? drafts.map((item, index) => `
     <label class="sortable-item"><span class="drag-handle">⋮⋮</span><div><b>${esc(item.title || `${item.person_name || "خبر"} — ${item.topic_name || "بدون موضوع"}`)}</b><p>${esc(item.person_name)} · ${esc(item.topic_name)} · جزئیات موضع: ${esc(item.detail || item.summary_title || "نامشخص")}</p></div><input class="bulletin-check" type="checkbox" value="${item.draft_id}" data-index="${index}" onchange="syncBulletinSelectAll()"></label>`).join("") : `<div class="empty-mini">هنوز خبر نهایی وجود ندارد.</div>`;
-  updateBulletinPreview();
 }
 
 function selectedFinalDrafts() {
@@ -2316,7 +3506,6 @@ function selectedFinalDrafts() {
 
 function toggleAllFinalizedDrafts(checked) {
   document.querySelectorAll(".bulletin-check").forEach((input) => { input.checked = Boolean(checked); });
-  updateBulletinPreview();
 }
 
 function syncBulletinSelectAll() {
@@ -2324,21 +3513,11 @@ function syncBulletinSelectAll() {
   const selectAll = $("selectAllFinalizedDrafts");
   if (selectAll) {
     selectAll.checked = Boolean(boxes.length) && boxes.every((input) => input.checked);
-    selectAll.indeterminate = boxes.some((input) => input.checked) && !selectAll.checked;
+    selectAll.indeterminate = boxes.some((input) => input.checked) && !boxes.every((input) => input.checked);
   }
-  updateBulletinPreview();
 }
 
-function updateBulletinPreview() {
-  $("previewTitle").textContent = $("bulletinTitle").value || "خبرنامه گرایه";
-  const selected = selectedFinalDrafts();
-  const highAttention = selectedBulletinHighAttentionItems();
-  const newsPreview = selected.map((item, index) => `<article class="preview-news"><h4>${n(index + 1)}. ${esc(item.title || `${item.person_name || "خبر"} — ${item.topic_name || "بدون موضوع"}`)}</h4><p><b>${esc(item.person_name || "")}</b> — ${esc(item.summary_sentence || item.summary_paragraph || "")}</p><small>جزئیات موضع: ${esc(item.detail || item.summary_title || "نامشخص")}</small></article>`).join("");
-  const highAttentionPreview = highAttention.map((item, index) => `<article class="preview-news high-attention-preview"><span class="eyebrow">پربازتاب</span><h4>${n(index + 1)}. ${esc(item.title)}</h4><p>${esc(item.summary)}</p></article>`).join("");
-  $("previewItems").innerHTML = (newsPreview || highAttentionPreview)
-    ? `${newsPreview}${highAttentionPreview}`
-    : `<div class="empty-mini">خبرها یا پربازتاب‌های نهایی انتخاب‌شده اینجا نمایش داده می‌شوند.</div>`;
-}
+function updateBulletinPreview() {}
 
 function bulletinOutputState(run) {
   const stage = String(run.current_stage || "");
@@ -2370,16 +3549,36 @@ async function loadBulletinWorkspace() {
   ]);
   state.bulletinDrafts = drafts;
   state.bulletinRuns = runs;
+  const pageSize = state.bulletinRunsPageSize;
+  const maxPage = Math.max(1, Math.ceil(runs.length / pageSize) || 1);
+  if (state.bulletinRunsPage > maxPage) state.bulletinRunsPage = maxPage;
+  const start = (state.bulletinRunsPage - 1) * pageSize;
+  const pageRuns = runs.slice(start, start + pageSize);
   renderBulletinDayPicker();
   renderFinalizedDraftsForDay();
   await loadBulletinHighAttentionItems();
-  $("bulletinRows").innerHTML = runs.length ? runs.map((run) => `
+  $("bulletinRows").innerHTML = pageRuns.length ? pageRuns.map((run) => `
     <tr>
       <td>${n(run.id)}</td><td>${n(run.issue_number || "—")}</td><td>${fdate(run.created_at)}</td>
       <td><span class="status-pill ${esc(run.status)}">${statusLabel(run.status)}</span><br>${bulletinOutputState(run)}</td>
       <td>${n(run.item_count)}</td><td>${renderBulletinRunActions(run)}</td>
     </tr>`).join("") : `<tr><td colspan="6">هنوز خبرنامه‌ای ساخته نشده است.</td></tr>`;
-  updateBulletinPreview();
+  renderPager({
+    bar: "bulletinPager",
+    numbers: "bulletinPageNumbers",
+    hint: "bulletinPageHint",
+    prev: "bulletinPrevPage",
+    next: "bulletinNextPage",
+  }, {
+    page: state.bulletinRunsPage,
+    pageCount: maxPage,
+    total: runs.length,
+    pageSize,
+    onSelect: (page) => {
+      state.bulletinRunsPage = page;
+      loadBulletinWorkspace().catch((error) => toast(error.message, true));
+    },
+  });
 }
 
 function startBulletinOutputPolling(runId, attempts = 90) {
@@ -2407,15 +3606,16 @@ function startBulletinOutputPolling(runId, attempts = 90) {
 }
 
 async function createManualBulletin() {
+  if (!state.bulletinFinalizationDay) return toast("روز نهایی‌سازی را انتخاب کنید.", true);
   const draftIds = selectedFinalDrafts().map((item) => item.draft_id);
   const highAttentionItemIds = selectedBulletinHighAttentionItems().map((item) => item.high_attention_item_id);
   if (!draftIds.length) return toast("حداقل یک خبر نهایی را انتخاب کنید.", true);
   try {
     const data = await api("/admin/api/editorial-bulletins", {method: "POST", body: JSON.stringify({
-      draft_ids: draftIds, title: $("bulletinTitle").value.trim() || null,
-      issue_number: Number($("bulletinIssue").value) || null, report_mode: $("bulletinMode").value,
+      draft_ids: draftIds, title: "خبرنامه گرایه",
+      issue_number: Number($("bulletinIssue").value) || null, report_mode: "concise",
       high_attention_item_ids: highAttentionItemIds,
-      introduction: $("bulletinIntroduction").value.trim() || null,
+      introduction: null,
     })});
     toast(`خبرنامه ${n(data.run_id)} ثبت شد؛ خروجی‌ها در حال آماده‌سازی هستند.`);
     await loadBulletinWorkspace();
@@ -2455,7 +3655,7 @@ async function loadPeople() {
 function fillPersonCategorySelects(selected = "") {
   const options = state.personCategories || [];
   const html = [`<option value="">انتخاب دسته</option>`, ...options.map((item) => `<option value="${esc(item)}">${esc(item)}</option>`)].join("");
-  for (const id of ["personCategory", "quickRegistryPersonCategory", "deskPersonCategory", "categoryRenameOld"]) {
+  for (const id of ["personCategory", "deskPersonCategory", "categoryRenameOld"]) {
     const node = $(id);
     if (!node) continue;
     const current = selected || node.value || "";
@@ -2712,9 +3912,10 @@ function startBotQueueRecoveryPolling() {
 }
 
 async function loadSystem() {
-  const [data, recovery] = await Promise.all([
+  const [data, recovery, gapgpt] = await Promise.all([
     api("/admin/api/system"),
     api("/admin/api/crawler/recovery"),
+    api("/admin/api/system/gapgpt-status").catch((error) => ({ok: false, error: error.message, groups: []})),
   ]);
   const db = data.database || {}, config = data.configuration || {}, counts = data.stats?.counts || {};
   $("systemMetrics").innerHTML = [
@@ -2758,6 +3959,88 @@ async function loadSystem() {
   $("connectionLabel").textContent = String(db.quick_check || "").toLowerCase() === "ok" ? "سامانه در دسترس است" : "نیازمند بررسی";
   renderCrawlerRecoveryStatus(recovery);
   renderLiveUpdateStatus(data.update || {version: data.version});
+  renderGapgptStatus(gapgpt);
+}
+
+function gapgptStatusLabel(status) {
+  return {operational: "سالم", degraded: "کاهش کیفیت", incident: "اختلال", unknown: "نامشخص"}[status] || status || "نامشخص";
+}
+
+function renderGapgptStatus(payload) {
+  const box = $("gapgptStatus");
+  if (!box) return;
+  if (!payload?.ok) {
+    box.innerHTML = `<div class="empty-mini">خواندن صفحهٔ وضعیت گپ‌جی‌پی‌تی ممکن نشد. ${esc(payload?.error || "")}</div>`;
+    return;
+  }
+  const groups = payload.groups || [];
+  const overall = payload.overall_status || "unknown";
+  box.innerHTML = `
+    <div class="gapgpt-overall">
+      <div><b>وضعیت کلی APIها</b><p style="margin:4px 0 0;color:var(--muted);font-size:12px">آخرین به‌روزرسانی منبع: ${esc(payload.generated_at ? fdate(payload.generated_at) : "—")}</p></div>
+      <span class="gapgpt-status-pill ${esc(overall)}">${esc(gapgptStatusLabel(overall))}</span>
+    </div>
+    ${groups.map((group) => {
+      const children = (group.children || []).map((child) => `
+        <div class="gapgpt-child">
+          <div class="panel-heading" style="margin-bottom:8px"><div><h4>${esc(child.name)}</h4><p>${esc(child.description || "")}</p></div><span class="gapgpt-status-pill ${esc(child.status)}">${esc(gapgptStatusLabel(child.status))}</span></div>
+          ${renderGapgptProbes(child.probes || [])}
+        </div>`).join("");
+      return `<article class="gapgpt-group">
+        <div class="panel-heading"><div><h4>${esc(group.name)}</h4><p>${esc(group.description || "")}</p></div><span class="gapgpt-status-pill ${esc(group.status)}">${esc(gapgptStatusLabel(group.status))}</span></div>
+        ${children || renderGapgptProbes(group.probes || [])}
+      </article>`;
+    }).join("")}`;
+}
+
+function renderGapgptProbes(probes) {
+  return `<div class="gapgpt-probes">${(probes || []).map((item) => `
+    <article class="gapgpt-probe">
+      <div>
+        <b>${esc(item.name || item.id)}</b>
+        <small>${esc(item.title || "")}${item.latency_ms != null ? ` · ${n(item.latency_ms)} میلی‌ثانیه` : ""}${item.checked_at ? ` · ${fdate(item.checked_at)}` : ""}</small>
+        <div class="gapgpt-uptime" aria-hidden="true">${(item.history || []).map((row) => `<i class="${esc(row.status || "unknown")}" title="${esc(row.date || "")} · ${esc(gapgptStatusLabel(row.status))}"></i>`).join("")}</div>
+      </div>
+      <span class="gapgpt-status-pill ${esc(item.status || "unknown")}">${esc(gapgptStatusLabel(item.status))}</span>
+    </article>`).join("")}</div>`;
+}
+
+async function loadApiKeys() {
+  const data = await api("/admin/api/api-keys");
+  renderApiKeyRows(data.items || []);
+}
+
+function renderApiKeyRows(items) {
+  const rows = $("apiKeyRows");
+  if (!rows) return;
+  rows.innerHTML = items.length ? items.map((item) => {
+    const revoked = Boolean(item.revoked_at);
+    return `<tr class="${revoked ? "inactive-row" : ""}"><td><b>${esc(item.name)}</b></td><td dir="ltr">${esc(item.token_prefix)}…</td><td>${fdate(item.created_at)}</td><td>${item.last_used_at ? fdate(item.last_used_at) : "—"}</td><td><span class="status-pill ${revoked ? "rejected" : "approved"}">${revoked ? "باطل‌شده" : "فعال"}</span></td><td>${revoked ? "" : `<button class="text-button danger-text" type="button" onclick="revokeApiKey(${item.api_key_id})">ابطال</button>`}</td></tr>`;
+  }).join("") : `<tr><td colspan="6">هنوز کلیدی ساخته نشده است.</td></tr>`;
+}
+
+function showCreatedApiKey(payload) {
+  const box = $("apiKeySecretBox");
+  if (!box) return;
+  box.classList.remove("hidden");
+  box.innerHTML = `<b>کلید فقط همین یک‌بار نمایش داده می‌شود.</b><code id="apiKeySecretValue">${esc(payload.token)}</code><div class="button-row"><button type="button" class="outline-button" id="copyApiKey">کپی کلید</button></div>`;
+  $("copyApiKey")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(payload.token);
+      toast("کلید در حافظه کپی شد.");
+    } catch (_) {
+      toast("کپی خودکار ممکن نشد؛ کلید را دستی کپی کنید.", true);
+    }
+  });
+}
+
+async function revokeApiKey(id) {
+  if (!confirm("این کلید باطل شود؟ فراخوانی‌های بعدی با آن رد می‌شود.")) return;
+  try {
+    await api(`/admin/api/api-keys/${id}`, {method: "DELETE"});
+    toast("کلید باطل شد.");
+    await loadApiKeys();
+  } catch (error) { toast(error.message, true); }
 }
 
 function renderLiveUpdateStatus(payload, extraMessage = "") {
@@ -2802,6 +4085,83 @@ async function loadUserPortal() {
   $("portalPassword").value = "";
 }
 
+let qsAnalysisInFlight = false;
+
+function emptyQuickStartState() {
+  return {
+    step: 1, dateFrom: "", dateTo: "", timeFrom: "00:00", timeTo: "23:59",
+    analyzing: false, analysisDone: false, highAttentionDay: "", outputDay: "",
+  };
+}
+
+function isQuickStartWorkspace() {
+  return state.page === "quick-start";
+}
+
+function keepQuickStartLocation() {
+  if (!isQuickStartWorkspace()) return false;
+  history.replaceState(null, "", "#quick-start");
+  return true;
+}
+
+function restoreEmbeddedDeskCopy() {
+  const eyebrow = $("finalizationDeskView")?.querySelector(".eyebrow");
+  if (eyebrow?.dataset.original) eyebrow.textContent = eyebrow.dataset.original;
+  const draftsEyebrow = $("finalizationDrafts")?.querySelector(".eyebrow");
+  if (draftsEyebrow?.dataset.original) draftsEyebrow.textContent = draftsEyebrow.dataset.original;
+}
+
+function mountQuickStartDesk() {
+  const host = $("qsDeskHost");
+  const desk = $("finalizationDeskView");
+  const drafts = $("finalizationDrafts");
+  if (!host || !desk || !drafts) return;
+  if (!state.qsDeskHomes) {
+    state.qsDeskHomes = {
+      deskParent: desk.parentNode,
+      deskNext: desk.nextSibling,
+      draftsParent: drafts.parentNode,
+      draftsNext: drafts.nextSibling,
+    };
+  }
+  if (desk.parentNode !== host) host.append(desk, drafts);
+  desk.classList.remove("hidden");
+  drafts.classList.remove("hidden");
+  $("finalizationRangeView")?.classList.add("hidden");
+  const deskEyebrow = desk.querySelector(".eyebrow");
+  if (deskEyebrow) {
+    deskEyebrow.dataset.original = deskEyebrow.dataset.original || deskEyebrow.textContent;
+    deskEyebrow.textContent = "شروع سریع · میز تدوین";
+  }
+  const draftsEyebrow = drafts.querySelector(".eyebrow");
+  if (draftsEyebrow) {
+    draftsEyebrow.dataset.original = draftsEyebrow.dataset.original || draftsEyebrow.textContent;
+    draftsEyebrow.textContent = "شروع سریع · پیش‌نویس و نهایی‌سازی";
+  }
+}
+
+function unmountQuickStartDesk() {
+  const homes = state.qsDeskHomes;
+  const desk = $("finalizationDeskView");
+  const drafts = $("finalizationDrafts");
+  if (!homes || !desk || desk.parentNode === homes.deskParent) {
+    restoreEmbeddedDeskCopy();
+    return;
+  }
+  if (homes.deskNext && homes.deskNext.parentNode === homes.deskParent) {
+    homes.deskParent.insertBefore(desk, homes.deskNext);
+  } else {
+    homes.deskParent.appendChild(desk);
+  }
+  if (homes.draftsNext && homes.draftsNext.parentNode === homes.draftsParent) {
+    homes.draftsParent.insertBefore(drafts, homes.draftsNext);
+  } else {
+    homes.draftsParent.appendChild(drafts);
+  }
+  restoreEmbeddedDeskCopy();
+  if (state.page === "finalization") renderFinalizationView();
+}
+
 function persistQuickStart() {
   try { localStorage.setItem("garaye:quick-start", JSON.stringify(state.quickStart)); } catch (_) {}
 }
@@ -2809,22 +4169,60 @@ function persistQuickStart() {
 function restoreQuickStart() {
   try {
     const saved = JSON.parse(localStorage.getItem("garaye:quick-start") || "null");
-    if (saved && typeof saved === "object") state.quickStart = {...state.quickStart, ...saved, analyzing: false};
+    if (saved && typeof saved === "object") {
+      state.quickStart = {...emptyQuickStartState(), ...saved, analyzing: qsAnalysisInFlight};
+    }
   } catch (_) {}
+}
+
+function setQuickStartAnalysisLocked(locked) {
+  $("qsBackToWindow")?.toggleAttribute("disabled", Boolean(locked));
+  $("resetQuickStart")?.toggleAttribute("disabled", Boolean(locked));
+  document.querySelectorAll(".qs-step-tab").forEach((tab) => {
+    tab.disabled = Boolean(locked);
+    tab.classList.toggle("is-locked", Boolean(locked));
+  });
+}
+
+function canEnterQuickStartStep(step) {
+  if (qsAnalysisInFlight && step !== 2) {
+    toast("تا پایان تحلیل خودکار نمی‌توانید این مرحله را ترک کنید.");
+    return false;
+  }
+  if (step > 1 && !state.quickStart.dateFrom) {
+    toast("ابتدا روز تحلیل را تأیید کنید.", true);
+    return false;
+  }
+  if (step >= 3 && !state.quickStart.analysisDone) {
+    toast("تحلیل اخبار این بازه هنوز کامل نشده است.", true);
+    return false;
+  }
+  return true;
 }
 
 function qsWindowParams() {
   const dateFrom = state.quickStart.dateFrom;
   const dateTo = state.quickStart.dateTo || dateFrom;
-  const timeFrom = state.quickStart.timeFrom || "00:00";
-  const timeTo = state.quickStart.timeTo || "23:59";
+  const timeFrom = clock24(state.quickStart.timeFrom || "00:00") || "00:00";
+  const timeTo = clock24(state.quickStart.timeTo || "23:59") || "23:59";
   return {
     dateFrom,
     dateTo,
-    fromStamp: dateFrom ? `${dateFrom} ${timeFrom}` : "",
-    toStamp: dateTo ? `${dateTo} ${timeTo}` : "",
+    timeFrom,
+    timeTo,
     flowDate: jalaliValueToFlowDate(dateFrom),
   };
+}
+
+function qsWindowQuery() {
+  const {dateFrom, dateTo, timeFrom, timeTo} = qsWindowParams();
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("date_from_jalali", dateFrom);
+  if (dateTo) params.set("date_to_jalali", dateTo);
+  if (timeFrom) params.set("time_from", timeFrom);
+  if (timeTo) params.set("time_to", timeTo);
+  params.set("timezone", "Asia/Tehran");
+  return params;
 }
 
 function syncQuickStartWindowToSystem() {
@@ -2839,21 +4237,11 @@ function syncQuickStartWindowToSystem() {
   ["streamTo", "finalizationDateTo", "garayeTo", "qsDateTo"].forEach((id) => { if ($(id)) $(id).value = dateTo; });
   if ($("finalizationTimeFrom")) $("finalizationTimeFrom").value = timeFrom;
   if ($("finalizationTimeTo")) $("finalizationTimeTo").value = timeTo;
+  if ($("streamTimeFrom")) $("streamTimeFrom").value = timeFrom;
+  if ($("streamTimeTo")) $("streamTimeTo").value = timeTo;
   if ($("garayeFromTime")) $("garayeFromTime").value = timeFrom;
   if ($("garayeToTime")) $("garayeToTime").value = timeTo;
   if ($("garayeRangePreset")) $("garayeRangePreset").value = "custom";
-  const flowDate = jalaliValueToFlowDate(dateFrom);
-  if (flowDate) {
-    state.highAttentionDay = flowDate;
-    state.bulletinFinalizationDay = flowDate;
-    ensureSelectOption($("highAttentionDay"), flowDate, highAttentionDayLabel(flowDate));
-    ensureSelectOption($("bulletinFinalizationDay"), flowDate, highAttentionDayLabel(flowDate));
-    syncJalaliFlowInput("highAttentionJalaliDate", flowDate);
-    syncJalaliFlowInput("bulletinJalaliDate", flowDate);
-  }
-  if ($("bulletinTitle") && $("qsBulletinTitle")?.value.trim()) $("bulletinTitle").value = $("qsBulletinTitle").value.trim();
-  if ($("bulletinMode") && $("qsBulletinMode")) $("bulletinMode").value = $("qsBulletinMode").value;
-  if ($("bulletinIntroduction") && $("qsBulletinIntroduction")) $("bulletinIntroduction").value = $("qsBulletinIntroduction").value;
 }
 
 function setQuickStartStep(step) {
@@ -2867,6 +4255,7 @@ function setQuickStartStep(step) {
   for (let index = 1; index <= 5; index += 1) {
     $(`qsStep${index}`)?.classList.toggle("hidden", index !== state.quickStart.step);
   }
+  if (state.quickStart.step !== 3) unmountQuickStartDesk();
 }
 
 async function loadQuickStart() {
@@ -2876,10 +4265,23 @@ async function loadQuickStart() {
   if ($("qsTimeFrom")) $("qsTimeFrom").value = state.quickStart.timeFrom || "00:00";
   if ($("qsTimeTo")) $("qsTimeTo").value = state.quickStart.timeTo || "23:59";
   setQuickStartStep(state.quickStart.step);
-  if (state.quickStart.step >= 2) await refreshQuickStartAnalysis();
-  if (state.quickStart.step >= 3) await refreshQuickStartFinalization();
-  if (state.quickStart.step >= 4) await refreshQuickStartHighAttention();
-  if (state.quickStart.step >= 5) await refreshQuickStartOutput();
+  setQuickStartAnalysisLocked(qsAnalysisInFlight);
+  if (state.quickStart.step === 2) {
+    const progress = await refreshQuickStartAnalysis();
+    if (!progress) {
+      setQuickStartStep(1);
+    } else if (Number(progress.remaining || 0)) {
+      await runQuickStartAnalysis({autoAdvance: true});
+    } else if (!qsAnalysisInFlight) {
+      state.quickStart.analysisDone = true;
+      persistQuickStart();
+      setQuickStartStep(3);
+    }
+  }
+  if (state.quickStart.step === 3) await refreshQuickStartFinalization();
+  else unmountQuickStartDesk();
+  if (state.quickStart.step >= 4) await refreshQuickStartHighAttention({fillDays: true});
+  if (state.quickStart.step >= 5) await refreshQuickStartOutput({fillDays: true});
 }
 
 async function confirmQuickStartWindow() {
@@ -2887,203 +4289,208 @@ async function confirmQuickStartWindow() {
   if (!parseJalaliInput(dateFrom)) return toast("روز تحلیل را از تقویم انتخاب کنید یا به‌صورت ۱۴۰۵/۰۵/۲۶ وارد کنید.", true);
   state.quickStart.dateFrom = dateFrom;
   state.quickStart.dateTo = $("qsDateTo").value.trim() || dateFrom;
-  state.quickStart.timeFrom = $("qsTimeFrom").value || "00:00";
-  state.quickStart.timeTo = $("qsTimeTo").value || "23:59";
+  state.quickStart.timeFrom = clock24($("qsTimeFrom").value || "00:00") || "00:00";
+  state.quickStart.timeTo = clock24($("qsTimeTo").value || "23:59") || "23:59";
+  state.quickStart.analysisDone = false;
   syncQuickStartWindowToSystem();
   persistQuickStart();
   setQuickStartStep(2);
-  await refreshQuickStartAnalysis();
+  await runQuickStartAnalysis({autoAdvance: true});
 }
 
-function renderQuickStartProgress(progress) {
-  const total = Number(progress.total || 0);
-  const analyzed = Number(progress.analyzed || 0);
-  const remaining = Number(progress.remaining || 0);
-  const percent = total ? Math.round(analyzed / total * 100) : 0;
+function renderQuickStartProgress(progress, {running = false} = {}) {
+  const total = Number(progress?.total || 0);
+  const analyzed = Number(progress?.analyzed || 0);
+  const remaining = Number(progress?.remaining || 0);
+  const percent = total ? Math.min(100, Math.round(analyzed / total * 100)) : (running ? 0 : 100);
+  const status = running
+    ? `${n(remaining)} خبر باقی مانده؛ تحلیل خودکار با موتور اول در حال اجرا است.`
+    : remaining
+      ? `${n(remaining)} خبر تا پایان تحلیل باقی مانده است.`
+      : total
+        ? "همه اخبار این بازه تحلیل شده‌اند."
+        : "در این بازه خبری برای تحلیل نبود.";
   $("qsAnalysisProgress").innerHTML = `
     <span class="eyebrow">پیشرفت تحلیل</span>
     <b>${n(analyzed)} از ${n(total)} خبر تحلیل شده است</b>
-    <small>${remaining ? `${n(remaining)} خبر تا پایان تحلیل باقی مانده است.` : "همه اخبار این بازه تحلیل شده‌اند."}</small>
+    <small>${status}</small>
     <div class="qs-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><i style="width:${percent}%"></i></div>`;
 }
 
 async function refreshQuickStartAnalysis() {
-  const {fromStamp, toStamp} = qsWindowParams();
-  if (!fromStamp) {
+  const {dateFrom} = qsWindowParams();
+  if (!dateFrom) {
     $("qsAnalysisProgress").innerHTML = `<small>ابتدا روز تحلیل را تأیید کنید.</small>`;
-    return;
+    return null;
   }
-  const params = new URLSearchParams({date_from_jalali: fromStamp, date_to_jalali: toStamp});
-  const [progress, preview] = await Promise.all([
-    api(`/admin/api/messages/progress?${params}`),
-    api(`/admin/api/messages?${new URLSearchParams({...Object.fromEntries(params), limit: "12"})}`),
-  ]);
-  renderQuickStartProgress(progress);
-  $("qsRunAnalysis").disabled = !progress.remaining || state.quickStart.analyzing;
-  $("qsStreamPreview").innerHTML = (preview.items || []).length
-    ? preview.items.map((item) => `<article><b>${esc(item.source_chat_title || item.source_chat_username || "منبع")}</b><p>${esc((item.text || item.caption || "").slice(0, 180))}</p><small>${esc(fdate(item.published_at || item.received_at))}</small></article>`).join("")
-    : `<div class="empty-mini">در این بازه خبری در دیتابیس نیست.</div>`;
+  const progress = await api(`/admin/api/messages/progress?${qsWindowQuery()}`);
+  if (!Number(progress.remaining || 0)) {
+    state.quickStart.analysisDone = true;
+    persistQuickStart();
+  }
+  renderQuickStartProgress(progress, {running: qsAnalysisInFlight});
+  return progress;
 }
 
-async function runQuickStartAnalysis() {
-  const {fromStamp, toStamp} = qsWindowParams();
-  const progress = await api(`/admin/api/messages/progress?${new URLSearchParams({date_from_jalali: fromStamp, date_to_jalali: toStamp})}`);
-  const ids = progress.remaining_ids || [];
-  if (!ids.length) {
-    toast("خبر تحلیل‌نشده‌ای در این بازه باقی نمانده است.");
-    return setQuickStartStep(3);
-  }
-  state.quickStart.analyzing = true;
-  $("qsRunAnalysis").disabled = true;
-  $("qsRunAnalysis").textContent = "در حال تحلیل…";
+async function qsUnanalyzedMessageIds(progress) {
+  const fromProgress = (Array.isArray(progress?.remaining_ids) ? progress.remaining_ids : [])
+    .map(Number)
+    .filter((id) => id > 0);
+  if (fromProgress.length) return fromProgress;
+  const unanalyzedQuery = qsWindowQuery();
+  unanalyzedQuery.set("status", "unanalyzed");
   try {
-    for (let index = 0; index < ids.length; index += 200) {
-      const batch = ids.slice(index, index + 200);
-      await api("/admin/api/messages/analyze", {method: "POST", body: JSON.stringify({message_ids: batch})});
-      renderQuickStartProgress({
-        total: progress.total,
-        analyzed: progress.analyzed + index + batch.length,
-        remaining: Math.max(0, ids.length - index - batch.length),
-      });
+    const listed = await api(`/admin/api/messages/ids?${unanalyzedQuery}`);
+    const ids = (listed.ids || []).map(Number).filter((id) => id > 0);
+    if (ids.length) return ids;
+  } catch (_) {}
+  if (!Number(progress?.remaining || 0)) return [];
+  const fallback = await api(`/admin/api/messages/ids?${qsWindowQuery()}`);
+  return (fallback.ids || []).map(Number).filter((id) => id > 0);
+}
+
+async function runQuickStartAnalysis({autoAdvance = true} = {}) {
+  if (qsAnalysisInFlight) return;
+  if (!qsWindowParams().dateFrom) {
+    toast("بازه زمانی را کامل کنید.", true);
+    return;
+  }
+  qsAnalysisInFlight = true;
+  state.quickStart.analyzing = true;
+  persistQuickStart();
+  setQuickStartAnalysisLocked(true);
+  try {
+    let lastRemaining = Infinity;
+    let stallCount = 0;
+    while (true) {
+      const progress = await api(`/admin/api/messages/progress?${qsWindowQuery()}`);
+      renderQuickStartProgress(progress, {running: true});
+      const remaining = Number(progress.remaining || 0);
+      const ids = await qsUnanalyzedMessageIds(progress);
+      if (!remaining && !ids.length) {
+        state.quickStart.analysisDone = true;
+        persistQuickStart();
+        renderQuickStartProgress(progress, {running: false});
+        if (autoAdvance && state.quickStart.step === 2) {
+          toast(progress.total ? "تحلیل اخبار این بازه انجام شد." : "در این بازه خبری برای تحلیل نبود.");
+          setQuickStartStep(3);
+          await refreshQuickStartFinalization();
+        }
+        return;
+      }
+      if (!ids.length) {
+        toast("در این بازه خبری برای تحلیل یافت نشد.", true);
+        return;
+      }
+      if (remaining && remaining >= lastRemaining) stallCount += 1;
+      else stallCount = 0;
+      lastRemaining = remaining || ids.length;
+      if (stallCount >= 2) {
+        toast("تحلیل متوقف شد؛ این مرحله را دوباره انتخاب کنید تا ادامه یابد.", true);
+        return;
+      }
+      for (let index = 0; index < ids.length; index += 200) {
+        const batch = ids.slice(index, index + 200);
+        await api("/admin/api/messages/analyze", {method: "POST", body: JSON.stringify({message_ids: batch})});
+        renderQuickStartProgress({
+          total: progress.total || ids.length,
+          analyzed: Number(progress.analyzed || 0) + index + batch.length,
+          remaining: Math.max(0, (remaining || ids.length) - index - batch.length),
+        }, {running: true});
+      }
     }
-    toast("تحلیل اخبار این بازه انجام شد.");
-    await refreshQuickStartAnalysis();
-    setQuickStartStep(3);
-    await refreshQuickStartFinalization();
   } catch (error) {
     toast(error.message, true);
     await refreshQuickStartAnalysis();
   } finally {
+    qsAnalysisInFlight = false;
     state.quickStart.analyzing = false;
-    $("qsRunAnalysis").textContent = "شروع تحلیل اخبار باقی‌مانده";
+    persistQuickStart();
+    setQuickStartAnalysisLocked(false);
   }
 }
 
 async function refreshQuickStartFinalization() {
-  const {fromStamp, toStamp} = qsWindowParams();
-  if (!fromStamp) return;
-  syncQuickStartWindowToSystem();
-  if (!state.people.length) await loadPeople();
-  const filters = await api(`/admin/api/analysis/filters?${new URLSearchParams({date_from_jalali: fromStamp, date_to_jalali: toStamp, timezone: "Asia/Tehran"})}`);
-  $("qsSpeaker").innerHTML = `<option value="">یک گوینده انتخاب کنید</option>` + (filters.speakers || []).map((item) => `<option value="${esc(item.speaker_name)}">${esc(item.speaker_name)} · ${n(item.message_count)}</option>`).join("");
-  $("qsEvent").innerHTML = `<option value="">یک رویداد مستقل</option>` + (filters.events || []).map((item) => `<option value="${Number(item.message_id)}">${esc(item.event_title)}</option>`).join("");
-  $("qsGeneralTopic").innerHTML = `<option value="">همه موضوعات کلی</option>` + (filters.general_topics || []).map((item) => `<option value="${esc(item.general_topic)}">${esc(item.general_topic)}</option>`).join("");
-  $("qsSpecificTopic").innerHTML = `<option value="">همه موضوعات مشخص</option>` + (filters.specific_topics || []).map((item) => `<option value="${esc(item.specific_topic)}">${esc(item.specific_topic)}</option>`).join("");
-  const progress = filters.progress || {};
-  const panel = $("qsFinalizationProgress");
-  const totalUnits = Number(progress.total_people || 0) + Number(progress.total_events || 0);
-  const remainingUnits = Number(progress.remaining_people || 0) + Number(progress.remaining_events || 0);
-  const percent = totalUnits ? Math.round((totalUnits - remainingUnits) / totalUnits * 100) : 100;
-  panel.classList.remove("hidden");
-  panel.innerHTML = `<div class="finalization-progress-copy"><span class="eyebrow">پیشرفت نهایی‌سازی</span><b>${n(percent)}٪ تکمیل شده</b><small>${n(progress.remaining_people || 0)} گوینده و ${n(progress.remaining_events || 0)} رویداد باقی مانده است.</small></div><div class="finalization-progress-track"><i style="width:${percent}%"></i></div>`;
-  await loadQuickStartAnalyzed();
-  await loadQuickStartDrafts();
-}
-
-async function loadQuickStartAnalyzed() {
-  const speaker = $("qsSpeaker").value;
-  const eventMessageId = Number($("qsEvent").value) || null;
-  if (!speaker && !eventMessageId) {
-    $("qsAnalyzedList").innerHTML = `<div class="empty-mini">یک گوینده یا رویداد را انتخاب کنید.</div>`;
-    $("qsAnalyzedCount").textContent = "۰ خبر";
-    $("qsCreateDraft").disabled = true;
-    return;
-  }
-  const {fromStamp, toStamp} = qsWindowParams();
-  const params = new URLSearchParams({date_from_jalali: fromStamp, date_to_jalali: toStamp});
-  if (speaker) params.set("speaker", speaker);
-  if (eventMessageId) params.set("event_message_id", String(eventMessageId));
-  if ($("qsGeneralTopic").value) params.set("general_topic", $("qsGeneralTopic").value);
-  if ($("qsSpecificTopic").value) params.set("specific_topic", $("qsSpecificTopic").value);
-  const rows = groupAnalyzedMessages(await api(`/admin/api/analysis/messages?${params}`));
-  state.analyzedMessages = rows;
-  state.selectedAnalyzedMessages = new Set(rows.map((item) => Number(item.id)));
-  $("qsAnalyzedCount").textContent = `${n(rows.length)} خبر`;
-  $("qsCreateDraft").disabled = !rows.length;
-  $("qsAnalyzedList").innerHTML = rows.length ? rows.map((item) => `
-    <article class="analyzed-card selected">
-      <div><h4>${esc(item.source_chat_title || item.analysis_event_title || `پیام ${item.id}`)}</h4><span class="analysis-date">${esc(fdate(item.published_at || item.received_at))}</span></div>
-      <p>${esc((item.text || item.caption || "").slice(0, 280))}</p>
-    </article>`).join("") : `<div class="empty-mini">خبر تحلیل‌شده‌ای برای این انتخاب نیست.</div>`;
-}
-
-async function loadQuickStartDrafts() {
-  const drafts = await api("/admin/api/editorial-drafts");
-  const {flowDate, dateFrom} = qsWindowParams();
-  const filtered = drafts.filter((item) => {
-    if (flowDate && String(item.flow_date || "") === flowDate) return true;
-    const stamp = jalaliInputDate(item.finalized_at || item.updated_at);
-    return stamp === dateFrom;
-  });
-  $("qsDraftList").innerHTML = filtered.length ? filtered.map((item) => `
-    <article class="draft-item">
-      <div><span class="status-pill ${esc(item.status)}">${statusLabel(item.status)}</span></div>
-      <h4>${esc(item.title || item.person_name || `پیش‌نویس ${item.draft_id}`)}</h4>
-      <p>${esc(item.summary_sentence || item.topic_name || "")}</p>
-      <div class="button-row">
-        ${item.status === "draft" ? `<button type="button" class="primary-button" onclick="quickFinalizeDraft(${item.draft_id})">نهایی‌سازی سریع</button>` : ""}
-        <button type="button" class="text-button" onclick="showPage('finalization','drafts');openDraft(${item.draft_id})">ویرایش کامل</button>
-      </div>
-    </article>`).join("") : `<div class="empty-mini">هنوز پیش‌نویسی برای این بازه نیست.</div>`;
-}
-
-async function createQuickStartDraft() {
-  syncQuickStartWindowToSystem();
-  if (!state.people.length) await loadPeople();
-  state.finalizationWindowConfirmed = true;
-  $("finalizationSpeaker").value = $("qsSpeaker").value;
-  $("finalizationEvent").value = $("qsEvent").value;
-  if ($("finalizationGeneralTopic")) $("finalizationGeneralTopic").value = $("qsGeneralTopic").value;
-  if ($("finalizationSpecificTopic")) $("finalizationSpecificTopic").value = $("qsSpecificTopic").value;
-  await createDraftFromAnalysis();
-  await loadQuickStartDrafts();
-  await refreshQuickStartFinalization();
-}
-
-async function quickFinalizeDraft(draftId) {
   const {dateFrom} = qsWindowParams();
-  const now = tehranTimeInput(new Date().toISOString()) || "12:00";
-  try {
-    await api(`/admin/api/editorial-drafts/${draftId}/finalize`, {
-      method: "POST",
-      body: JSON.stringify({
-        finalized_date_jalali: dateFrom,
-        finalized_time: now,
-        timezone: "Asia/Tehran",
-      }),
-    });
-    toast("خبر نهایی شد و برای پربازتاب و خبرنامه آماده است.");
-    await loadQuickStartDrafts();
-  } catch (error) { toast(error.message, true); }
+  if (!dateFrom) return;
+  syncQuickStartWindowToSystem();
+  mountQuickStartDesk();
+  if (!state.people.length || !state.topics.length) await loadReferenceData();
+  await loadAnalysisFilters();
+  await loadDrafts();
 }
 
-async function refreshQuickStartHighAttention() {
-  syncQuickStartWindowToSystem();
-  const {flowDate} = qsWindowParams();
-  if (!flowDate) {
-    $("qsHighAttentionDrafts").innerHTML = `<div class="empty-mini">ابتدا روز تحلیل را تأیید کنید.</div>`;
+async function fillQsFinalizationDaySelect(selectId, selectedDay) {
+  const select = $(selectId);
+  if (!select) return [];
+  const days = await api("/admin/api/high-attention/days");
+  if (selectedDay && !days.some((item) => item.day === selectedDay)) {
+    days.unshift({day: selectedDay, draft_count: 0});
+  }
+  select.innerHTML = `<option value="">انتخاب روز نهایی‌سازی</option>` + days.map((item) =>
+    `<option value="${esc(item.day)}">${esc(highAttentionDayLabel(item.day))} · ${n(item.draft_count)} خبر نهایی</option>`
+  ).join("");
+  select.value = selectedDay || "";
+  return days;
+}
+
+function updateQuickStartHighAttentionSelection() {
+  const boxes = [...document.querySelectorAll(".qs-ha-check")];
+  const count = boxes.filter((input) => input.checked).length;
+  const selectAll = $("qsSelectAllHighAttention");
+  if (selectAll) {
+    selectAll.checked = Boolean(boxes.length) && count === boxes.length;
+    selectAll.indeterminate = count > 0 && count < boxes.length;
+  }
+  const button = $("qsGenerateHighAttention");
+  if (!button) return;
+  button.disabled = !count;
+  button.textContent = count
+    ? `تولید پربازتاب از ${n(count)} خبر انتخاب‌شده`
+    : "تولید پربازتاب";
+}
+
+async function refreshQuickStartHighAttention({fillDays = false} = {}) {
+  const selectedDay = state.quickStart.highAttentionDay || "";
+  if (fillDays) {
+    const days = await fillQsFinalizationDaySelect("qsHighAttentionDay", selectedDay);
+    $("qsHighAttentionDayHint").textContent = days.length
+      ? `${n(days.length)} روز دارای خبر نهایی برای بررسی پربازتاب در دسترس است.`
+      : "ابتدا خبر را نهایی کنید تا روز آن اینجا بیاید.";
+  }
+  const toolbar = $("qsHighAttentionToolbar");
+  const selectAll = $("qsSelectAllHighAttention");
+  state.currentHighAttention = null;
+  renderQuickStartHighAttentionEditor(null);
+  if (!selectedDay) {
+    toolbar?.classList.add("hidden");
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    }
+    $("qsHighAttentionHint").textContent = "خبرهای نهایی همین روز";
+    $("qsHighAttentionDrafts").innerHTML = `<div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div>`;
+    updateQuickStartHighAttentionSelection();
     return;
   }
-  state.highAttentionDay = flowDate;
-  const [drafts, runs] = await Promise.all([
-    api(`/admin/api/high-attention/drafts?source_day=${encodeURIComponent(flowDate)}`),
-    api(`/admin/api/high-attention?source_day=${encodeURIComponent(flowDate)}`),
-  ]);
+  const drafts = await api(`/admin/api/high-attention/drafts?source_day=${encodeURIComponent(selectedDay)}`);
   state.highAttentionDrafts = drafts;
-  $("qsHighAttentionHint").textContent = `${n(drafts.length)} خبر نهایی در این روز`;
-  $("qsHighAttentionDrafts").innerHTML = drafts.length ? drafts.map((item) => `
-    <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title || item.person_name || "خبر")}</b><p>${esc(item.summary_sentence || item.topic_name || "")}</p></div><input class="qs-ha-check" type="checkbox" value="${item.draft_id}" checked></label>`).join("") : `<div class="empty-mini">برای این روز خبر نهایی‌شده‌ای وجود ندارد.</div>`;
-  $("qsGenerateHighAttention").disabled = !drafts.length;
-  const current = (runs || []).find((item) => item.status === "draft") || (runs || [])[0];
-  if (current?.high_attention_run_id) {
-    const run = await api(`/admin/api/high-attention/${current.high_attention_run_id}`);
-    state.currentHighAttention = run;
-    renderQuickStartHighAttentionEditor(run);
+  toolbar?.classList.toggle("hidden", !drafts.length);
+  if (selectAll && !drafts.length) {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
   }
+  $("qsHighAttentionHint").textContent = drafts.length
+    ? `${n(drafts.length)} خبر نهایی در این روز`
+    : "خبر نهایی‌شده‌ای برای این روز نیست";
+  $("qsHighAttentionDrafts").innerHTML = drafts.length ? drafts.map((item) => `
+    <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title || item.person_name || "خبر")}</b><p>${esc(item.summary_sentence || item.topic_name || "")}</p></div><input class="qs-ha-check" type="checkbox" value="${item.draft_id}"></label>`).join("") : `<div class="empty-mini">برای این روز خبر نهایی‌شده‌ای وجود ندارد.</div>`;
+  updateQuickStartHighAttentionSelection();
 }
 
 function renderQuickStartHighAttentionEditor(run) {
   const editor = $("qsHighAttentionEditor");
+  if (!editor) return;
   if (!run) { editor.classList.add("hidden"); return; }
   editor.classList.remove("hidden");
   const locked = run.status === "finalized";
@@ -3096,15 +4503,25 @@ function renderQuickStartHighAttentionEditor(run) {
 }
 
 async function generateQuickStartHighAttention() {
-  const {flowDate} = qsWindowParams();
+  const sourceDay = state.quickStart.highAttentionDay || $("qsHighAttentionDay")?.value;
   const ids = [...document.querySelectorAll(".qs-ha-check:checked")].map((item) => Number(item.value)).filter(Boolean);
-  if (!flowDate || !ids.length) return toast("حداقل یک خبر نهایی را انتخاب کنید.", true);
+  if (!sourceDay) return toast("روز نهایی‌سازی را انتخاب کنید.", true);
+  if (!ids.length) return toast("حداقل یک خبر نهایی را انتخاب کنید.", true);
+  const button = $("qsGenerateHighAttention");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "در حال تولید…";
+  }
   try {
-    const run = await api("/admin/api/high-attention/generate", {method: "POST", body: JSON.stringify({source_day: flowDate, draft_ids: ids})});
+    const run = await api("/admin/api/high-attention/generate", {method: "POST", body: JSON.stringify({source_day: sourceDay, draft_ids: ids})});
     state.currentHighAttention = run;
     renderQuickStartHighAttentionEditor(run);
-    toast("پربازتاب تولید شد؛ تیترها را بررسی و نهایی کنید.");
-  } catch (error) { toast(error.message, true); }
+    toast((run.items || []).length ? "پربازتاب تولید شد؛ تیترها را بررسی و نهایی کنید." : "برای خبرهای انتخاب‌شده محور پربازتابی پیدا نشد.");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    updateQuickStartHighAttentionSelection();
+  }
 }
 
 async function saveQuickStartHighAttention() {
@@ -3132,25 +4549,60 @@ async function finalizeQuickStartHighAttention() {
   } catch (error) { toast(error.message, true); }
 }
 
-async function refreshQuickStartOutput() {
-  syncQuickStartWindowToSystem();
-  const {flowDate} = qsWindowParams();
+function updateQuickStartOutputActions() {
+  const day = state.quickStart.outputDay;
+  const count = document.querySelectorAll(".qs-bulletin-check:checked").length;
+  const selectAll = $("qsSelectAllBulletin");
+  const boxes = [...document.querySelectorAll(".qs-bulletin-check")];
+  if (selectAll) {
+    selectAll.checked = Boolean(boxes.length) && boxes.every((input) => input.checked);
+    selectAll.indeterminate = boxes.some((input) => input.checked) && !selectAll.checked;
+  }
+  const button = $("qsCreateBulletin");
+  if (button) button.disabled = !day || !count;
+}
+
+async function refreshQuickStartOutput({fillDays = false} = {}) {
+  const selectedDay = state.quickStart.outputDay || "";
+  if (fillDays) {
+    const days = await fillQsFinalizationDaySelect("qsOutputDay", selectedDay);
+    $("qsOutputDayHint").textContent = days.length
+      ? "خروجی فقط از خبرهایی ساخته می‌شود که خودتان تیک زده‌اید."
+      : "ابتدا خبر را نهایی کنید تا روز آن اینجا بیاید.";
+  }
+  const toolbar = $("qsOutputToolbar");
+  if (!selectedDay) {
+    toolbar?.classList.add("hidden");
+    $("qsOutputHint").textContent = "خبرهای نهایی همین روز";
+    $("qsBulletinDrafts").innerHTML = `<div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div>`;
+    $("qsBulletinHighAttention").innerHTML = `<div class="empty-mini">ابتدا روز نهایی‌سازی را انتخاب کنید.</div>`;
+    updateQuickStartOutputActions();
+    const runs = await api("/admin/api/bulletins");
+    $("qsBulletinRuns").innerHTML = runs.length ? `<table><thead><tr><th>شناسه</th><th>وضعیت</th><th>خروجی</th></tr></thead><tbody>${runs.slice(0, 8).map((run) => `<tr><td>${n(run.id)}</td><td>${statusLabel(run.status)}</td><td>${renderBulletinRunActions(run)}</td></tr>`).join("")}</tbody></table>` : "";
+    return;
+  }
   const [drafts, runs, highAttention] = await Promise.all([
     api("/admin/api/editorial-drafts?status=finalized"),
     api("/admin/api/bulletins"),
-    flowDate ? api(`/admin/api/high-attention/finalized-items?source_day=${encodeURIComponent(flowDate)}`) : [],
+    api(`/admin/api/high-attention/finalized-items?source_day=${encodeURIComponent(selectedDay)}`),
   ]);
-  const dayDrafts = drafts.filter((item) => String(item.flow_date || "") === flowDate);
+  const dayDrafts = drafts.filter((item) => String(item.flow_date || "") === selectedDay);
+  toolbar?.classList.toggle("hidden", !dayDrafts.length);
+  $("qsOutputHint").textContent = dayDrafts.length
+    ? `${n(dayDrafts.length)} خبر نهایی برای انتخاب`
+    : "خبر نهایی این روز وجود ندارد";
   $("qsBulletinDrafts").innerHTML = dayDrafts.length ? dayDrafts.map((item) => `
-    <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title || item.person_name || "خبر")}</b><p>${esc(item.summary_sentence || "")}</p></div><input class="qs-bulletin-check" type="checkbox" value="${item.draft_id}" checked></label>`).join("") : `<div class="empty-mini">خبر نهایی این روز وجود ندارد.</div>`;
+    <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title || item.person_name || "خبر")}</b><p>${esc(item.summary_sentence || "")}</p></div><input class="qs-bulletin-check" type="checkbox" value="${item.draft_id}"></label>`).join("") : `<div class="empty-mini">خبر نهایی این روز وجود ندارد.</div>`;
   $("qsBulletinHighAttention").innerHTML = (highAttention || []).length ? highAttention.map((item) => `
-    <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title)}</b><p>${esc(item.summary)}</p></div><input class="qs-bulletin-ha-check" type="checkbox" value="${item.high_attention_item_id}" checked></label>`).join("") : `<div class="empty-mini">پربازتاب نهایی این روز وجود ندارد.</div>`;
+    <label class="sortable-item"><span class="drag-handle">◉</span><div><b>${esc(item.title)}</b><p>${esc(item.summary)}</p></div><input class="qs-bulletin-ha-check" type="checkbox" value="${item.high_attention_item_id}"></label>`).join("") : `<div class="empty-mini">پربازتاب نهایی این روز وجود ندارد.</div>`;
   $("qsBulletinRuns").innerHTML = runs.length ? `<table><thead><tr><th>شناسه</th><th>وضعیت</th><th>خروجی</th></tr></thead><tbody>${runs.slice(0, 8).map((run) => `<tr><td>${n(run.id)}</td><td>${statusLabel(run.status)}</td><td>${renderBulletinRunActions(run)}</td></tr>`).join("")}</tbody></table>` : "";
+  updateQuickStartOutputActions();
 }
 
 async function createQuickStartBulletin() {
   const draftIds = [...document.querySelectorAll(".qs-bulletin-check:checked")].map((item) => Number(item.value));
   const highAttentionItemIds = [...document.querySelectorAll(".qs-bulletin-ha-check:checked")].map((item) => Number(item.value));
+  if (!state.quickStart.outputDay) return toast("روز نهایی‌سازی را انتخاب کنید.", true);
   if (!draftIds.length) return toast("حداقل یک خبر نهایی را انتخاب کنید.", true);
   try {
     const result = await api("/admin/api/editorial-bulletins", {
@@ -3174,7 +4626,9 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   closeNavigationMenus();
 }));
 document.querySelectorAll("[data-go]").forEach((item) => item.addEventListener("click", () => showPage(item.dataset.go)));
-$("mobileMenu").addEventListener("click", () => $("sidebar").classList.toggle("open"));
+$("mobileMenu").addEventListener("click", toggleMobileNav);
+$("closeNav")?.addEventListener("click", closeMobileNav);
+$("navBackdrop")?.addEventListener("click", closeMobileNav);
 $("backToPeople").addEventListener("click", () => showPage("people"));
 $("editProfilePerson").addEventListener("click", () => {
   if (!state.personProfileId) return;
@@ -3188,8 +4642,12 @@ $("logoutButton").addEventListener("click", async () => {
 $("refreshPage").addEventListener("click", () => loadPage(state.page).then(() => toast("اطلاعات تازه شد.")).catch((error) => toast(error.message, true)));
 $("calendarPrevious").addEventListener("click", () => moveCalendarMonth(-1));
 $("calendarNext").addEventListener("click", () => moveCalendarMonth(1));
-$("applyStreamFilters").addEventListener("click", () => loadStream().catch((error) => toast(error.message, true)));
-$("streamQuery").addEventListener("keydown", (event) => { if (event.key === "Enter") loadStream(); });
+$("applyStreamFilters").addEventListener("click", () => {
+  state.selectedMessages.clear();
+  state.streamPage = 1;
+  loadStream({page: 1}).catch((error) => toast(error.message, true));
+});
+$("streamQuery").addEventListener("keydown", (event) => { if (event.key === "Enter") { state.streamPage = 1; loadStream({page: 1}); } });
 $("analyzeSelected").addEventListener("click", analyzeSelectedMessages);
 $("selectVisibleMessages").addEventListener("click", selectVisibleMessages);
 $("clearMessageSelection").addEventListener("click", clearMessageSelection);
@@ -3199,32 +4657,20 @@ $("applyGarayeFilters").addEventListener("click", () => loadGarayeInsights().cat
 $("garayeRangePreset").addEventListener("change", () => setGarayeRangePreset($("garayeRangePreset").value, {load: true}));
 ["garayeFrom", "garayeFromTime", "garayeTo", "garayeToTime"].forEach((id) => $(id).addEventListener("input", () => { $("garayeRangePreset").value = "custom"; }));
 $("garayeWordTrendSelect").addEventListener("change", () => { state.garayeWordTrendWord = $("garayeWordTrendSelect").value; renderGarayeWordTrend(); });
-$("startEditorialAutomation").addEventListener("click", () => {
-  try {
-    return editorialAutomationAction(
-      "/admin/api/editorial-automation/analysis/start",
-      "تحلیل خودکار از زمان انتخابی شروع شد و هر ۱۰ دقیقه ادامه می‌یابد.",
-      automationStartPayload("analysisAutomationStartDate", "analysisAutomationStartTime"),
-    );
-  } catch (error) { toast(error.message, true); return null; }
+$("openEitanGara")?.addEventListener("click", () => showPage("eitan-gara"));
+$("backToGarayeFromEitan")?.addEventListener("click", () => showPage("garaye"));
+$("cancelEitanCreate")?.addEventListener("click", () => toggleEitanCreate(false));
+$("eitanCreatePanel")?.addEventListener("submit", (event) => submitEitanCreate(event).catch((error) => toast(error.message, true)));
+$("eitanReplaceLibraryFile")?.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  replaceEitanLibrary(file).catch((error) => toast(error.message, true));
 });
-$("stopEditorialAutomation").addEventListener("click", () => editorialAutomationAction("/admin/api/editorial-automation/analysis/stop", "چرخهٔ خودکار متوقف شد."));
-$("runEditorialAnalysisNow").addEventListener("click", () => editorialAutomationAction("/admin/api/editorial-automation/analysis/run-now", "اجرای فوری تحلیل برای همان بازه انجام شد."));
-$("startEditorialDraftAutomation").addEventListener("click", () => {
-  try {
-    return editorialAutomationAction(
-      "/admin/api/editorial-automation/drafts/start",
-      "تولید پیش‌نویس خودکار از زمان انتخابی شروع شد و هر ۳ ساعت ادامه می‌یابد.",
-      automationStartPayload("draftAutomationStartDate", "draftAutomationStartTime"),
-    );
-  } catch (error) { toast(error.message, true); return null; }
-});
-$("stopEditorialDraftAutomation").addEventListener("click", () => editorialAutomationAction("/admin/api/editorial-automation/drafts/stop", "تولید پیش‌نویس خودکار متوقف شد."));
-$("runEditorialDraftsNow").addEventListener("click", () => editorialAutomationAction("/admin/api/editorial-automation/drafts/run-now", "ساخت فوری پیش‌نویس برای همان بازه انجام شد."));
-$("refreshHumanControl").addEventListener("click", () => loadHumanControl().catch((error) => toast(error.message, true)));
 $("refreshAnalysisFilters").addEventListener("click", () => loadAnalysisFilters().catch((error) => toast(error.message, true)));
 $("applyFinalizationWindow").addEventListener("click", () => loadAnalysisFilters().catch((error) => toast(error.message, true)));
 $("changeFinalizationRange").addEventListener("click", () => {
+  if (isQuickStartWorkspace()) return;
   state.finalizationStage = "range";
   renderFinalizationView();
   $("finalizationDateFrom").focus();
@@ -3241,8 +4687,25 @@ $("finalizationEvent").addEventListener("change", () => {
 });
 $("finalizationGeneralTopic").addEventListener("change", () => loadAnalyzedMessages().catch((error) => toast(error.message, true)));
 $("finalizationSpecificTopic").addEventListener("change", () => loadAnalyzedMessages().catch((error) => toast(error.message, true)));
-["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime"].forEach((id) => {
-  $(id)?.addEventListener("input", (event) => { event.currentTarget.dataset.touched = "1"; });
+["deskPersonName", "deskPersonPosition", "deskPersonCategory", "deskEventTitle", "deskEventLocation", "deskEventTime", "deskNewPersonName", "deskPersonAliases"].forEach((id) => {
+  $(id)?.addEventListener("input", (event) => {
+    event.currentTarget.dataset.touched = "1";
+    if (id === "deskNewPersonName") $("deskPersonName").value = event.currentTarget.value.trim();
+    setDeskIdentityStatus("برای ذخیره، ثبت را بزنید.");
+  });
+});
+$("deskPersonSearch")?.addEventListener("focus", () => renderDeskPersonOptions($("deskPersonSearch").value));
+$("deskPersonSearch")?.addEventListener("input", (event) => {
+  event.currentTarget.dataset.touched = "1";
+  renderDeskPersonOptions(event.currentTarget.value);
+});
+$("deskWrongPerson")?.addEventListener("click", () => openDeskIdentityAction("replace"));
+$("deskChoiceCreate")?.addEventListener("click", () => openDeskIdentityAction("create"));
+$("deskChoiceMatch")?.addEventListener("click", () => openDeskIdentityAction("match"));
+$("confirmDeskIdentity")?.addEventListener("click", () => confirmDeskIdentity().catch((error) => toast(error.message, true)));
+$("cancelDeskIdentity")?.addEventListener("click", () => cancelDeskIdentity());
+document.addEventListener("click", (event) => {
+  if (!$("deskPersonCombobox")?.contains(event.target)) closeDeskPersonOptions();
 });
   ["finalizationDateFrom", "finalizationTimeFrom", "finalizationDateTo", "finalizationTimeTo"].forEach((id) => {
     $(id).addEventListener("change", invalidateFinalizationWindow);
@@ -3260,34 +4723,9 @@ $("deleteDraft").addEventListener("click", deleteCurrentDraft);
 $("generateBase").addEventListener("click", () => generateDraft("base"));
   $("generateAllSummaries").addEventListener("click", () => generateDraft("summaries"));
   $("createShortLink").addEventListener("click", createShortLink);
-  ["draftPerson", "draftCategory", "draftTopic", "summaryParagraph", "summarySentence", "summaryTitle"].forEach((id) => {
-    $(id).addEventListener("input", refreshCurrentCandidatePreview);
-    $(id).addEventListener("change", refreshCurrentCandidatePreview);
-  });
-  $("cancelQuickRegistryPerson").addEventListener("click", hideQuickRegistryPrompt);
-  $("quickRegistryPersonForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const messageId = Number($("quickRegistrySourceMessageId").value);
-    const tagId = Number($("quickRegistryPersonForm").dataset.tagId);
-    if (!messageId || !tagId) return toast("برچسب گوینده برای افزودن به شناسنامه پیدا نشد.", true);
-    const button = $("addDetectedPersonToRegistry");
-    const originalText = button.textContent;
-    button.disabled = true;
-    button.textContent = "در حال افزودن…";
-    try {
-      const result = await api(`/admin/api/analysis/messages/${messageId}/speakers/${tagId}/promote-person`, {
-        method: "POST",
-        body: JSON.stringify({category: $("quickRegistryPersonCategory").value.trim() || null}),
-      });
-      await loadReferenceData();
-      await loadAnalysisFilters();
-      toast(result.created ? "شخص به شناسنامه افزوده و تگ‌های هم‌نام متصل شد." : "شناسنامه موجود به تگ‌های تحلیل‌شده متصل شد.");
-    } catch (error) {
-      toast(error.message, true);
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
+  ["draftPerson", "draftCategory", "draftTopic", "summaryParagraph", "summarySentence", "summaryTitle", "deskFootnote"].forEach((id) => {
+    $(id)?.addEventListener("input", refreshCurrentCandidatePreview);
+    $(id)?.addEventListener("change", refreshCurrentCandidatePreview);
   });
 $("createManualBulletin").addEventListener("click", createManualBulletin);
 $("highAttentionDay").addEventListener("change", () => {
@@ -3333,7 +4771,6 @@ $("bulletinJalaliDate")?.addEventListener("change", () => {
   renderFinalizedDraftsForDay();
   loadBulletinHighAttentionItems().catch((error) => toast(error.message, true));
 });
-$("bulletinTitle").addEventListener("input", updateBulletinPreview);
 $("showPersonForm").addEventListener("click", () => {
   fillPersonCategorySelects("");
   $("personForm").classList.remove("hidden");
@@ -3480,6 +4917,18 @@ $("backupNow").addEventListener("click", async () => {
   try { await api("/admin/api/backup", {method: "POST"}); toast("نسخه پشتیبان با موفقیت ساخته شد."); await loadSystem(); }
   catch (error) { toast(error.message, true); }
 });
+$("apiKeyForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("apiKeyName")?.value.trim();
+  if (!name) return toast("نام کلید را وارد کنید.", true);
+  try {
+    const created = await api("/admin/api/api-keys", {method: "POST", body: JSON.stringify({name})});
+    $("apiKeyName").value = "";
+    showCreatedApiKey(created);
+    await loadApiKeys();
+    toast("کلید ساخته شد؛ مقدار کامل را همین حالا کپی کنید.");
+  } catch (error) { toast(error.message, true); }
+});
 document.querySelectorAll("[data-draft-filter]").forEach((item) => item.addEventListener("click", () => {
   document.querySelectorAll("[data-draft-filter]").forEach((button) => button.classList.remove("active"));
   item.classList.add("active"); state.draftFilter = item.dataset.draftFilter; loadDrafts();
@@ -3491,51 +4940,109 @@ document.querySelectorAll("[data-draft-origin]").forEach((item) => item.addEvent
 document.querySelectorAll("[data-close-dialog]").forEach((item) => item.addEventListener("click", () => item.closest("dialog").close()));
 
 window.selectMessage = selectMessage; window.selectVisibleMessages = selectVisibleMessages; window.clearMessageSelection = clearMessageSelection; window.openMessage = openMessage;
+window.handleStreamMediaError = handleStreamMediaError;
 window.selectAnalyzedMessage = selectAnalyzedMessage; window.searchMessageInGoogle = searchMessageInGoogle;
 window.discardMessageFromDesk = discardMessageFromDesk;
 window.correctAnalyzedSpeaker = correctAnalyzedSpeaker;
 window.viewPerson = viewPerson;
 window.openDraft = openDraft; window.restoreDraftVersion = restoreDraftVersion; window.toggleSource = toggleSource;
-$("loadMoreStream")?.addEventListener("click", () => loadStream({append: true}).catch((error) => toast(error.message, true)));
+window.saveSourceTitle = saveSourceTitle;
+window.revokeApiKey = revokeApiKey;
 $("currentUser")?.addEventListener("click", () => showPage("portal"));
 document.querySelectorAll(".quick-start-nav").forEach((item) => item.addEventListener("click", () => showPage(item.dataset.page)));
 document.querySelectorAll(".qs-step-tab").forEach((tab) => tab.addEventListener("click", () => {
   const step = Number(tab.dataset.qsStep);
-  if (step > 1 && !state.quickStart.dateFrom) return toast("ابتدا روز تحلیل را تأیید کنید.", true);
+  if (!canEnterQuickStartStep(step)) return;
   setQuickStartStep(step);
-  loadQuickStart().catch((error) => toast(error.message, true));
+  if (step === 2) {
+    refreshQuickStartAnalysis().then((progress) => {
+      if (!state.quickStart.analysisDone || Number(progress?.remaining || 0)) {
+        return runQuickStartAnalysis({autoAdvance: !state.quickStart.analysisDone});
+      }
+      return null;
+    }).catch((error) => toast(error.message, true));
+    return;
+  }
+  if (step === 3) refreshQuickStartFinalization().catch((error) => toast(error.message, true));
+  if (step === 4) refreshQuickStartHighAttention({fillDays: true}).catch((error) => toast(error.message, true));
+  if (step === 5) refreshQuickStartOutput({fillDays: true}).catch((error) => toast(error.message, true));
 }));
 $("qsConfirmWindow")?.addEventListener("click", () => confirmQuickStartWindow().catch((error) => toast(error.message, true)));
-$("qsRunAnalysis")?.addEventListener("click", () => runQuickStartAnalysis().catch((error) => toast(error.message, true)));
-$("qsSkipToFinalization")?.addEventListener("click", () => { setQuickStartStep(3); refreshQuickStartFinalization().catch((error) => toast(error.message, true)); });
-$("qsBackToWindow")?.addEventListener("click", () => setQuickStartStep(1));
-$("qsBackToAnalysis")?.addEventListener("click", () => setQuickStartStep(2));
-$("qsGoHighAttention")?.addEventListener("click", () => { setQuickStartStep(4); refreshQuickStartHighAttention().catch((error) => toast(error.message, true)); });
-$("qsOpenFullDesk")?.addEventListener("click", () => { syncQuickStartWindowToSystem(); showPage("finalization", "workbench"); });
-$("qsCreateDraft")?.addEventListener("click", () => createQuickStartDraft().catch((error) => toast(error.message, true)));
-["qsSpeaker", "qsEvent", "qsGeneralTopic", "qsSpecificTopic"].forEach((id) => {
-  $(id)?.addEventListener("change", () => {
-    if (id === "qsSpeaker" && $("qsSpeaker").value) $("qsEvent").value = "";
-    if (id === "qsEvent" && $("qsEvent").value) $("qsSpeaker").value = "";
-    loadQuickStartAnalyzed().catch((error) => toast(error.message, true));
-  });
+$("qsBackToWindow")?.addEventListener("click", () => {
+  if (!canEnterQuickStartStep(1)) return;
+  setQuickStartStep(1);
+});
+$("qsBackToAnalysis")?.addEventListener("click", () => {
+  if (!canEnterQuickStartStep(2)) return;
+  setQuickStartStep(2);
+  refreshQuickStartAnalysis().then((progress) => {
+    if (Number(progress?.remaining || 0)) {
+      return runQuickStartAnalysis({autoAdvance: true});
+    }
+    return null;
+  }).catch((error) => toast(error.message, true));
+});
+$("qsGoHighAttention")?.addEventListener("click", () => {
+  if (!canEnterQuickStartStep(4)) return;
+  setQuickStartStep(4);
+  refreshQuickStartHighAttention({fillDays: true}).catch((error) => toast(error.message, true));
+});
+$("qsHighAttentionDay")?.addEventListener("change", () => {
+  state.quickStart.highAttentionDay = $("qsHighAttentionDay").value;
+  persistQuickStart();
+  refreshQuickStartHighAttention().catch((error) => toast(error.message, true));
+});
+$("qsHighAttentionDrafts")?.addEventListener("change", (event) => {
+  if (event.target?.classList?.contains("qs-ha-check")) updateQuickStartHighAttentionSelection();
 });
 $("qsSelectAllHighAttention")?.addEventListener("change", (event) => {
   document.querySelectorAll(".qs-ha-check").forEach((input) => { input.checked = event.currentTarget.checked; });
+  updateQuickStartHighAttentionSelection();
 });
 $("qsGenerateHighAttention")?.addEventListener("click", () => generateQuickStartHighAttention());
 $("qsSaveHighAttention")?.addEventListener("click", () => saveQuickStartHighAttention().catch((error) => toast(error.message, true)));
 $("qsFinalizeHighAttention")?.addEventListener("click", () => finalizeQuickStartHighAttention());
 $("qsBackToFinalization")?.addEventListener("click", () => setQuickStartStep(3));
-$("qsGoOutput")?.addEventListener("click", () => { setQuickStartStep(5); refreshQuickStartOutput().catch((error) => toast(error.message, true)); });
-$("qsBackToHighAttention")?.addEventListener("click", () => setQuickStartStep(4));
+$("qsGoOutput")?.addEventListener("click", () => {
+  if (!canEnterQuickStartStep(5)) return;
+  setQuickStartStep(5);
+  refreshQuickStartOutput({fillDays: true}).catch((error) => toast(error.message, true));
+});
+$("qsBackToHighAttention")?.addEventListener("click", () => {
+  setQuickStartStep(4);
+  refreshQuickStartHighAttention({fillDays: true}).catch((error) => toast(error.message, true));
+});
+$("qsOutputDay")?.addEventListener("change", () => {
+  state.quickStart.outputDay = $("qsOutputDay").value;
+  persistQuickStart();
+  refreshQuickStartOutput().catch((error) => toast(error.message, true));
+});
+$("qsSelectAllBulletin")?.addEventListener("change", (event) => {
+  document.querySelectorAll(".qs-bulletin-check").forEach((input) => { input.checked = event.currentTarget.checked; });
+  updateQuickStartOutputActions();
+});
+$("qsBulletinDrafts")?.addEventListener("change", (event) => {
+  if (event.target?.classList?.contains("qs-bulletin-check")) updateQuickStartOutputActions();
+});
 $("qsCreateBulletin")?.addEventListener("click", () => createQuickStartBulletin());
-$("qsOpenBulletins")?.addEventListener("click", () => { syncQuickStartWindowToSystem(); showPage("bulletins"); });
+$("qsOpenBulletins")?.addEventListener("click", () => {
+  const outputDay = state.quickStart.outputDay;
+  if (outputDay) {
+    state.bulletinFinalizationDay = outputDay;
+    ensureSelectOption($("bulletinFinalizationDay"), outputDay, highAttentionDayLabel(outputDay));
+    syncJalaliFlowInput("bulletinJalaliDate", outputDay);
+  }
+  showPage("bulletins");
+});
 $("resetQuickStart")?.addEventListener("click", () => {
-  state.quickStart = {step: 1, dateFrom: "", dateTo: "", timeFrom: "00:00", timeTo: "23:59", analyzing: false};
+  if (qsAnalysisInFlight) return toast("تا پایان تحلیل خودکار نمی‌توانید شروع سریع را از ابتدا بازنشانی کنید.");
+  state.quickStart = emptyQuickStartState();
   persistQuickStart();
   if ($("qsDate")) $("qsDate").value = "";
   if ($("qsDateTo")) $("qsDateTo").value = "";
+  if ($("qsHighAttentionDay")) $("qsHighAttentionDay").value = "";
+  if ($("qsOutputDay")) $("qsOutputDay").value = "";
+  renderQuickStartHighAttentionEditor(null);
   setQuickStartStep(1);
 });
 $("portalProfileForm")?.addEventListener("submit", async (event) => {
@@ -3628,7 +5135,6 @@ window.updateBulletinPreview = updateBulletinPreview; window.updateHighAttention
 window.openHighAttentionRun = openHighAttentionRun; window.editPerson = editPerson;
 window.editAdminUser = editAdminUser;
 window.showMonitoringDayShare = showMonitoringDayShare;
-window.quickFinalizeDraft = quickFinalizeDraft;
 window.viewAdminUserProfile = viewAdminUserProfile;
 window.regenerateBulletinOutputs = regenerateBulletinOutputs;
 window.deleteBulletinRun = deleteBulletinRun;
@@ -3640,9 +5146,11 @@ window.deleteBulletinRun = deleteBulletinRun;
     await loadSources(true);
     setGarayeRangePreset($("garayeRangePreset").value);
     bindJalaliDatePickers();
+    bindTime24Pickers();
     restoreQuickStart();
     const [hashPage, hashSection] = location.hash.replace("#", "").split(":", 2);
-    showPage(pageMeta[hashPage] ? hashPage : "overview", hashSection || "");
+    const page = hashPage === "automation" ? "sources" : (pageMeta[hashPage] ? hashPage : "overview");
+    showPage(page, hashSection || "");
     $("connectionLabel").textContent = "سامانه در دسترس است";
   } catch (error) {
     $("connectionLabel").textContent = "خطا در اتصال";
