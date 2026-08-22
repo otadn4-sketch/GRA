@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   page: "overview", messages: [], selectedMessages: new Set(), sources: [],
-  people: [], personCategories: [], topics: [], drafts: [], currentDraft: null, draftFilter: "", draftOriginFilter: "", automation: null,
+  people: [], personCategories: [], topics: [], drafts: [], currentDraft: null, draftFilter: "", draftOriginFilter: "",
   bulletinDrafts: [], bulletinFinalizationDay: "", bulletinHighAttentionItems: [],
   highAttentionDay: "", highAttentionDrafts: [], highAttentionRuns: [], currentHighAttention: null,
   analysisFilters: {speakers: [], general_topics: [], specific_topics: [], events: []},
@@ -26,7 +26,6 @@ const state = {
 const pageMeta = {
   overview: ["تقویم و مناسبت‌ها", ""],
   stream: ["جریان اخبار", ""],
-  automation: ["خودکارسازی", "کنترل مستقل تحلیل هوشمند، کنترل انسانی و کرولر Selenium"],
   finalization: ["نهایی‌سازی خبر", ""],
   monitoring: ["نظارت", ""],
   garaye: ["گرایه", ""],
@@ -35,7 +34,7 @@ const pageMeta = {
   bulletins: ["خبرنامه‌ها", ""],
   people: ["شناسنامه اشخاص", "مدیریت نام، سمت، دسته و کانال اشخاص"],
   "person-profile": ["پروفایل شخص", "مشخصات، کانال‌ها و خبرهای منتسب به یک شخص"],
-  sources: ["منابع پایش", "کانال‌های اشخاص و گروه‌های پشتیبانی"],
+  sources: ["منابع پایش", "کانال‌های پایش، گروه پشتیبانی و کرولر کانال‌های عمومی"],
   users: ["کاربران و دسترسی", "تعریف حساب، نقش و مجوزهای هر کاربر"],
   "api-keys": ["کلیدهای API", "ساخت و ابطال کلید برای فراخوانی برنامه‌ای سامانه"],
   system: ["وضعیت سامانه", "سلامت اجزا، رویدادها، به‌روزرسانی زنده و پشتیبان‌گیری"],
@@ -637,6 +636,7 @@ function toast(message, isError = false) {
 }
 
 function showPage(page, section = "") {
+  if (page === "automation") return showPage("sources", section);
   const leavingQuickStart = state.page === "quick-start" && page !== "quick-start";
   if (page === "finalization") {
     state.finalizationView = section === "drafts" ? "drafts" : "workbench";
@@ -702,7 +702,6 @@ function closeNavigationMenus() {
 async function loadPage(page) {
   if (page === "overview") return loadCalendar();
   if (page === "stream") return loadStream();
-  if (page === "automation") return loadAutomationWorkspace();
   if (page === "finalization") return loadFinalizationWorkspace();
   if (page === "monitoring") return loadMonitoring();
   if (page === "garaye") return loadGarayeInsights();
@@ -1593,25 +1592,31 @@ async function loadSources(silent = false) {
       ${titleEditor}
     </article>`;
   }).join("") : `<div class="empty-mini">هنوز منبعی ثبت نشده است.</div>`;
-  $("crawlerChannels").value = (crawler.channels || []).join("\n");
-  $("crawlerBadge").className = `status-pill ${crawler.process_running ? "approved" : "pending"}`;
-  $("crawlerBadge").textContent = crawler.process_running
-    ? (crawler.enabled ? "در حال کرول" : "در حال توقف امن")
-    : (crawler.enabled ? "آمادهٔ اجرا" : "متوقف");
-  $("crawlerHelp").textContent =
-    `${n((crawler.channels || []).length)} کانال · هر ${n(Math.round((crawler.repeat_seconds || 1800) / 60))} دقیقه · ` +
-    `پروفایل Firefox: ${crawler.firefox_profile_configured ? "تنظیم‌شده" : "تشخیص خودکار"} · ` +
-    `مقصد: ${crawler.destination_configured ? "تنظیم‌شده" : "تنظیم‌نشده"}`;
+  if ($("crawlerChannels")) $("crawlerChannels").value = (crawler.channels || []).join("\n");
+  if ($("crawlerBadge")) {
+    $("crawlerBadge").className = `status-pill ${crawler.process_running ? "approved" : "pending"}`;
+    $("crawlerBadge").textContent = crawler.process_running
+      ? (crawler.enabled ? "در حال کرول" : "در حال توقف امن")
+      : (crawler.enabled ? "آمادهٔ اجرا" : "متوقف");
+  }
+  if ($("crawlerHelp")) {
+    $("crawlerHelp").textContent =
+      `${n((crawler.channels || []).length)} کانال · هر ${n(Math.round((crawler.repeat_seconds || 1800) / 60))} دقیقه · ` +
+      `پروفایل Firefox: ${crawler.firefox_profile_configured ? "تنظیم‌شده" : "تشخیص خودکار"} · ` +
+      `مقصد: ${crawler.destination_configured ? "تنظیم‌شده" : "تنظیم‌نشده"}`;
+  }
   const crawlerToggle = $("crawlerEnabledToggle");
-  crawlerToggle.className = `switch ${crawler.enabled ? "on" : "off"}`;
-  crawlerToggle.textContent = crawler.enabled ? "روشن" : "خاموش";
-  crawlerToggle.setAttribute("aria-pressed", String(Boolean(crawler.enabled)));
-  crawlerToggle.dataset.enabled = String(Boolean(crawler.enabled));
-  crawlerToggle.title = crawler.process_running
-    ? "تغییر وضعیت در دور جاری نیز بررسی می‌شود."
-    : "برای اجرای Selenium از دکمهٔ «اجرای کرولر» استفاده کنید.";
-  $("startCrawler").disabled = Boolean(crawler.process_running && crawler.enabled);
-  $("stopCrawler").disabled = !crawler.process_running && !crawler.enabled;
+  if (crawlerToggle) {
+    crawlerToggle.className = `switch ${crawler.enabled ? "on" : "off"}`;
+    crawlerToggle.textContent = crawler.enabled ? "روشن" : "خاموش";
+    crawlerToggle.setAttribute("aria-pressed", String(Boolean(crawler.enabled)));
+    crawlerToggle.dataset.enabled = String(Boolean(crawler.enabled));
+    crawlerToggle.title = crawler.process_running
+      ? "تغییر وضعیت در دور جاری نیز بررسی می‌شود."
+      : "برای اجرای Selenium از دکمهٔ «اجرای کرولر» استفاده کنید.";
+  }
+  if ($("startCrawler")) $("startCrawler").disabled = Boolean(crawler.process_running && crawler.enabled);
+  if ($("stopCrawler")) $("stopCrawler").disabled = !crawler.process_running && !crawler.enabled;
   if (!silent) $("connectionLabel").textContent = `${n(state.sources.filter((item) => Number(item.enabled)).length)} منبع فعال`;
 }
 
@@ -1893,6 +1898,7 @@ async function analyzeSelectedMessages() {
     const chunkSize = 200;
     let succeeded = 0;
     let failed = 0;
+    let skippedDuplicates = 0;
     let parallelism = 0;
     for (let index = 0; index < ids.length; index += chunkSize) {
       const batch = ids.slice(index, index + chunkSize);
@@ -1903,6 +1909,7 @@ async function analyzeSelectedMessages() {
       });
       succeeded += Number(result.succeeded || 0);
       failed += Number(result.failed || 0);
+      skippedDuplicates += Number(result.skipped_duplicates || 0);
       parallelism = Math.max(parallelism, Number(result.parallelism || 0));
     }
     state.selectedMessages.clear();
@@ -1910,9 +1917,12 @@ async function analyzeSelectedMessages() {
     const parallelNote = parallelism > 1
       ? ` با ${n(parallelism)} درخواست هم‌زمان`
       : "";
+    const duplicateNote = skippedDuplicates
+      ? ` ${n(skippedDuplicates)} خبر تکراری کنار گذاشته شد.`
+      : "";
     const message = failed
-      ? `${n(succeeded)} پیام${parallelNote} تحلیل شد و ${n(failed)} پیام خطا داشت.`
-      : `تحلیل ${n(succeeded)} پیام${parallelNote} ذخیره شد و در نهایی‌سازی در دسترس است.`;
+      ? `${n(succeeded)} پیام${parallelNote} تحلیل شد و ${n(failed)} پیام خطا داشت.${duplicateNote}`
+      : `تحلیل ${n(succeeded)} پیام${parallelNote} ذخیره شد و در نهایی‌سازی در دسترس است.${duplicateNote}`;
     toast(message, Boolean(failed));
   } catch (error) {
     toast(error.message, true);
@@ -2072,9 +2082,6 @@ function renderFinalizationView() {
   }
 }
 
-async function loadAutomationWorkspace() {
-  await Promise.all([loadEditorialAutomation(), loadHumanControl(), loadSources(true)]);
-}
 
 function renderFinalizationProgress(progress) {
   const panel = $("finalizationProgress");
@@ -2932,121 +2939,6 @@ async function createManualDraft() {
   }
 }
 
-function automationDate(value) {
-  return value ? fdate(value) : "—";
-}
-
-function automationLabel(value) {
-  return ({stopped: "متوقف", idle: "آماده", running: "در حال اجرا", completed: "انجام‌شده", failed: "نیازمند بررسی"})[String(value || "")] || "نامشخص";
-}
-
-function renderAutomationStatus(data) {
-  state.automation = data || {};
-  const analysisEnabled = Boolean(data?.analysis_enabled ?? data?.initial_analysis_enabled);
-  const draftsEnabled = Boolean(data?.drafts_enabled);
-  const enabledCount = Number(analysisEnabled) + Number(draftsEnabled);
-  const badge = $("automationStatusBadge");
-  badge.textContent = enabledCount === 2 ? "هر دو مرحله فعال‌اند" : (enabledCount ? "یک مرحله فعال است" : "همه مرحله‌ها متوقف‌اند");
-  badge.className = `status-pill ${enabledCount ? "approved" : "pending"}`;
-  $("analysisAutomationBadge").textContent = analysisEnabled ? "فعال" : "متوقف";
-  $("analysisAutomationBadge").className = `status-pill ${analysisEnabled ? "approved" : "pending"}`;
-  $("draftAutomationBadge").textContent = draftsEnabled ? "فعال" : "متوقف";
-  $("draftAutomationBadge").className = `status-pill ${draftsEnabled ? "approved" : "pending"}`;
-  $("startEditorialAutomation").classList.toggle("hidden", analysisEnabled);
-  $("stopEditorialAutomation").classList.toggle("hidden", !analysisEnabled);
-  $("startEditorialDraftAutomation").classList.toggle("hidden", draftsEnabled);
-  $("stopEditorialDraftAutomation").classList.toggle("hidden", !draftsEnabled);
-  $("runEditorialAnalysisNow").disabled = !analysisEnabled;
-  $("runEditorialDraftsNow").disabled = !draftsEnabled;
-  if (data?.analysis_start_at && document.activeElement !== $("analysisAutomationStartDate")) {
-    $("analysisAutomationStartDate").value = jalaliInputDate(data.analysis_start_at);
-    $("analysisAutomationStartTime").value = tehranTimeInput(data.analysis_start_at);
-  }
-  if (data?.draft_start_at && document.activeElement !== $("draftAutomationStartDate")) {
-    $("draftAutomationStartDate").value = jalaliInputDate(data.draft_start_at);
-    $("draftAutomationStartTime").value = tehranTimeInput(data.draft_start_at);
-  }
-  $("automationStatusDetails").innerHTML = `
-    <div><small>تحلیل اولیه</small><b>${automationLabel(data?.analysis_status)}</b><span>از ${esc(automationDate(data?.analysis_start_at))} · آخرین اجرا: ${esc(automationDate(data?.analysis_last_completed_at))} · ${n(data?.analysis_last_processed || 0)} پیام</span></div>
-    <div><small>پیش‌نویس خودکار</small><b>${automationLabel(data?.draft_status)}</b><span>از ${esc(automationDate(data?.draft_start_at))} · آخرین اجرا: ${esc(automationDate(data?.draft_last_completed_at))} · ${n(data?.draft_last_processed || 0)} پیش‌نویس</span></div>
-    <div><small>زمان‌بندی مستقل</small><b>هر ${n(data?.analysis_interval_minutes || 10)} دقیقه / ${n(data?.draft_interval_hours || 3)} ساعت</b><span>${data?.analysis_running || data?.draft_running ? "فرایندی در حال اجراست" : "آمادهٔ اجرای بعدی"}</span></div>`;
-}
-
-async function loadEditorialAutomation() {
-  try { renderAutomationStatus(await api("/admin/api/editorial-automation")); }
-  catch (error) { toast(error.message, true); }
-}
-
-function automationStartPayload(dateId, timeId) {
-  const date = $(dateId).value.trim();
-  const time = $(timeId).value.trim();
-  if (!date || !time) throw new Error("روز و ساعت شروع این فرایند را وارد کنید.");
-  return {start_date_jalali: date, start_time: time, timezone: "Asia/Tehran"};
-}
-
-async function editorialAutomationAction(path, message, body = null) {
-  try {
-    const result = await api(path, {method: "POST", body: body ? JSON.stringify(body) : undefined});
-    if (result.initial_analysis_enabled !== undefined) renderAutomationStatus(result);
-    else await loadEditorialAutomation();
-    toast(message || "عملیات خودکار ثبت شد.");
-    await Promise.all([loadHumanControl(), loadDrafts()]);
-  } catch (error) { toast(error.message, true); }
-}
-
-function humanControlEvidence(candidate) {
-  const evidence = Array.isArray(candidate.web_evidence) ? candidate.web_evidence : [];
-  if (!evidence.length) return `<p class="muted">برای این مورد، نتیجهٔ قابل اتکایی از جست‌وجوی بیرونی ثبت نشد؛ با متن پیام و شناسنامه بررسی کنید.</p>`;
-  return `<details class="candidate-evidence"><summary>${n(evidence.length)} شاهد جست‌وجو</summary>${evidence.map((item) => `<a href="${esc(item.url || "#")}" target="_blank" rel="noopener"><b>${esc(item.title || "نتیجه")}</b><span>${esc(item.snippet || "")}</span></a>`).join("")}</details>`;
-}
-
-async function loadHumanControl() {
-  const host = $("humanControlList");
-  if (!host) return;
-  if (!state.people.length) await loadReferenceData();
-  const candidates = await api("/admin/api/person-candidates?status=pending");
-  host.innerHTML = candidates.length ? candidates.map((candidate) => {
-    const targetOptions = [`<option value="">انتخاب شخص در شناسنامه</option>`, ...state.people.map((person) => `<option value="${person.person_id}">${esc(person.full_name)}${person.position ? ` · ${esc(person.position)}` : ""}</option>`)].join("");
-    const initialName = candidate.suggested_name || candidate.detected_name || "";
-    const kind = candidate.candidate_kind === "position_only" ? "سمت بدون نام" : "نام نیازمند تطبیق";
-    return `<article class="human-control-card">
-      <section class="human-control-message"><div class="human-control-step"><span>۱</span><b>پیام مبنا</b></div><p>${esc(candidate.sample_text || candidate.sample_caption || "متن پیام مبنا در دسترس نیست؛ با تعداد پیام‌های مرتبط و شواهد زیر بررسی کنید.")}</p><small>${n(candidate.linked_message_count || 1)} پیام مرتبط · ${esc(candidate.candidate_kind === "position_only" ? "هوش فقط سمت را تشخیص داده است" : "نامزد از تحلیل و جست‌وجو استخراج شده است")}</small></section>
-      <section class="human-control-candidate"><div class="human-control-step"><span>۲</span><b>نامزد گوینده و تصمیم</b></div><div class="human-control-copy"><span class="status-pill pending">${esc(kind)}</span><h4>${esc(initialName || "نامشخص")}</h4>
-        <p>${candidate.detected_position ? `سمت تشخیص‌شده: ${esc(candidate.detected_position)}` : "سمت مشخص نشده"}</p>
-        ${candidate.web_query ? `<p class="muted">عبارت جست‌وجو: ${esc(candidate.web_query)}</p>` : ""}${humanControlEvidence(candidate)}</div>
-      <div class="human-control-form" data-candidate="${candidate.candidate_id}">
-        <label>نام کامل برای ثبت<input id="candidateName_${candidate.candidate_id}" value="${esc(initialName)}"></label>
-        <label>سمت / سمت افزوده<input id="candidatePosition_${candidate.candidate_id}" value="${esc(candidate.detected_position || "")}"></label>
-        <label>دسته<select id="candidateCategory_${candidate.candidate_id}">${[`<option value="">انتخاب دسته</option>`, ...(state.personCategories || []).map((item) => `<option value="${esc(item)}" ${item === (candidate.category || "") ? "selected" : ""}>${esc(item)}</option>`)].join("")}</select></label>
-        <label>تطبیق با شناسنامه<select id="candidateTarget_${candidate.candidate_id}">${targetOptions}</select></label>
-        <div class="actions"><button class="blue" type="button" onclick="reviewHumanCandidate(${candidate.candidate_id},'merge')">تطبیق و تکمیل شناسنامه</button><button class="primary" type="button" onclick="reviewHumanCandidate(${candidate.candidate_id},'approve')">افزودن به شناسنامه</button><button class="danger" type="button" onclick="reviewHumanCandidate(${candidate.candidate_id},'reject')">رد پیشنهاد</button></div>
-      </div></section></article>`;
-  }).join("") : `<div class="empty-mini">موردی برای کنترل انسانی باقی نمانده است.</div>`;
-}
-
-async function reviewHumanCandidate(candidateId, action) {
-  const target = Number($(`candidateTarget_${candidateId}`).value) || null;
-  if (action === "merge" && !target) return toast("شخص مقصد را از شناسنامه انتخاب کنید.", true);
-  const body = {
-    action,
-    merge_person_id: target,
-    full_name: $(`candidateName_${candidateId}`).value.trim() || null,
-    position: $(`candidatePosition_${candidateId}`).value.trim() || null,
-    category: $(`candidateCategory_${candidateId}`).value.trim() || null,
-    add_detected_alias: true,
-    add_position: true,
-  };
-  try {
-    await api(`/admin/api/person-candidates/${candidateId}`, {method: "PATCH", body: JSON.stringify(body)});
-    toast(action === "reject" ? "پیشنهاد رد شد." : "شناسنامه و خبرهای مرتبط به‌روزرسانی شد.");
-    await Promise.all([
-      loadHumanControl(),
-      loadReferenceData(),
-      state.finalizationWindowConfirmed ? loadAnalysisFilters() : Promise.resolve(),
-      state.finalizationView === "drafts" ? loadDrafts() : Promise.resolve(),
-    ]);
-  } catch (error) { toast(error.message, true); }
-}
 
 async function loadDrafts() {
   if (!state.people.length || !state.topics.length) await loadReferenceData();
@@ -4775,29 +4667,6 @@ $("eitanReplaceLibraryFile")?.addEventListener("change", (event) => {
   if (!file) return;
   replaceEitanLibrary(file).catch((error) => toast(error.message, true));
 });
-$("startEditorialAutomation").addEventListener("click", () => {
-  try {
-    return editorialAutomationAction(
-      "/admin/api/editorial-automation/analysis/start",
-      "تحلیل خودکار از زمان انتخابی شروع شد و هر ۱۰ دقیقه ادامه می‌یابد.",
-      automationStartPayload("analysisAutomationStartDate", "analysisAutomationStartTime"),
-    );
-  } catch (error) { toast(error.message, true); return null; }
-});
-$("stopEditorialAutomation").addEventListener("click", () => editorialAutomationAction("/admin/api/editorial-automation/analysis/stop", "چرخهٔ خودکار متوقف شد."));
-$("runEditorialAnalysisNow").addEventListener("click", () => editorialAutomationAction("/admin/api/editorial-automation/analysis/run-now", "اجرای فوری تحلیل برای همان بازه انجام شد."));
-$("startEditorialDraftAutomation").addEventListener("click", () => {
-  try {
-    return editorialAutomationAction(
-      "/admin/api/editorial-automation/drafts/start",
-      "تولید پیش‌نویس خودکار از زمان انتخابی شروع شد و هر ۳ ساعت ادامه می‌یابد.",
-      automationStartPayload("draftAutomationStartDate", "draftAutomationStartTime"),
-    );
-  } catch (error) { toast(error.message, true); return null; }
-});
-$("stopEditorialDraftAutomation").addEventListener("click", () => editorialAutomationAction("/admin/api/editorial-automation/drafts/stop", "تولید پیش‌نویس خودکار متوقف شد."));
-$("runEditorialDraftsNow").addEventListener("click", () => editorialAutomationAction("/admin/api/editorial-automation/drafts/run-now", "ساخت فوری پیش‌نویس برای همان بازه انجام شد."));
-$("refreshHumanControl").addEventListener("click", () => loadHumanControl().catch((error) => toast(error.message, true)));
 $("refreshAnalysisFilters").addEventListener("click", () => loadAnalysisFilters().catch((error) => toast(error.message, true)));
 $("applyFinalizationWindow").addEventListener("click", () => loadAnalysisFilters().catch((error) => toast(error.message, true)));
 $("changeFinalizationRange").addEventListener("click", () => {
@@ -5280,7 +5149,8 @@ window.deleteBulletinRun = deleteBulletinRun;
     bindTime24Pickers();
     restoreQuickStart();
     const [hashPage, hashSection] = location.hash.replace("#", "").split(":", 2);
-    showPage(pageMeta[hashPage] ? hashPage : "overview", hashSection || "");
+    const page = hashPage === "automation" ? "sources" : (pageMeta[hashPage] ? hashPage : "overview");
+    showPage(page, hashSection || "");
     $("connectionLabel").textContent = "سامانه در دسترس است";
   } catch (error) {
     $("connectionLabel").textContent = "خطا در اتصال";

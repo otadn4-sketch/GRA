@@ -37,7 +37,7 @@ if (Test-Path -LiteralPath $envPath) {
 # cycle, so this launcher must start even when the initial .env value is off.
 
 $process = Start-Process -FilePath $python `
-    -ArgumentList @($scriptPath) -WorkingDirectory $projectRoot `
+    -ArgumentList @("-m", "app.crawler_launcher") -WorkingDirectory $projectRoot `
     -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput (Join-Path $logDir "crawler.out.log") `
     -RedirectStandardError (Join-Path $logDir "crawler.err.log")

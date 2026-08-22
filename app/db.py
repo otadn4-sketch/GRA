@@ -34,6 +34,7 @@ from .eitan_library import (
     library_from_axis,
     library_from_parts,
 )
+from .near_duplicate import is_near_duplicate, message_body
 from .persian_text import canonical_key, normalize_persian
 from .wordcloud import WORD_CLOUD_WEIGHTS, content_words, ranked_word_cloud
 
@@ -916,6 +917,20 @@ CREATE INDEX IF NOT EXISTS ix_messages_status ON messages(status, received_at DE
 CREATE INDEX IF NOT EXISTS ix_messages_source ON messages(source_chat_id, source_message_id);
 CREATE INDEX IF NOT EXISTS ix_messages_person ON messages(detected_person_id, detected_person_name);
 CREATE INDEX IF NOT EXISTS ix_messages_topic ON messages(detected_topic_id);
+CREATE INDEX IF NOT EXISTS ix_messages_duplicate_of ON messages(duplicate_of);
+
+CREATE TABLE IF NOT EXISTS crawler_send_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin_key TEXT,
+    text_sha256 TEXT,
+    text TEXT,
+    method TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_crawler_send_log_origin
+ON crawler_send_log(origin_key, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_crawler_send_log_hash
+ON crawler_send_log(text_sha256, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS message_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3710,7 +3725,9 @@ class Database:
                 ))"""
 
     def _unanalyzed_message_sql(self) -> str:
-        return """(IFNULL(m.ai_enrichment_status,'')<>'validated' AND NOT EXISTS (
+        return """(IFNULL(m.ai_enrichment_status,'') NOT IN ('validated','duplicate')
+                    AND IFNULL(m.duplicate_of,0)=0
+                    AND NOT EXISTS (
                     SELECT 1 FROM message_speaker_tags analyzed
                     WHERE analyzed.message_id=m.id
                 ))"""
@@ -3844,8 +3861,6 @@ class Database:
             person = None
             if preset_person_id not in (None, "", 0, "0"):
                 person = await self.get_person(int(preset_person_id))
-            if person is None and name != "نامشخص":
-                person = await self.find_unique_person(name)
             normalized.append(
                 {
                     "name": name[:240],
@@ -6528,6 +6543,95 @@ class Database:
         )
         return await self.get_editorial_automation_state()
 
+    async def messages_for_duplicate_compare(
+        self, message_ids: list[int]
+    ) -> list[dict[str, Any]]:
+        ids = [int(value) for value in message_ids if int(value) > 0]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        rows = await self._fetchall(
+            f"""
+            SELECT id,text,caption,text_sha256,published_at,received_at,created_at,
+                   duplicate_of,ai_enrichment_status
+            FROM messages WHERE id IN ({placeholders})
+            """,
+            ids,
+        )
+        order = {message_id: index for index, message_id in enumerate(ids)}
+        rows.sort(key=lambda row: order.get(int(row["id"]), 0))
+        return rows
+
+    async def recent_message_bodies_for_duplicate_compare(
+        self,
+        *,
+        exclude_ids: Sequence[int] = (),
+        days: int = 7,
+        limit: int = 800,
+    ) -> list[dict[str, Any]]:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, days))).isoformat()
+        excluded = [int(value) for value in exclude_ids if int(value) > 0]
+        where = [
+            "COALESCE(published_at,received_at,created_at)>=?",
+            "(TRIM(COALESCE(text,''))<>'' OR TRIM(COALESCE(caption,''))<>'')",
+        ]
+        params: list[Any] = [cutoff]
+        if excluded:
+            where.append(
+                "id NOT IN (" + ",".join("?" for _ in excluded) + ")"
+            )
+            params.extend(excluded)
+        params.append(max(1, min(int(limit), 4000)))
+        return await self._fetchall(
+            f"""
+            SELECT id,text,caption,text_sha256,published_at,received_at,created_at,duplicate_of,
+                   ai_enrichment_status
+            FROM messages
+            WHERE {' AND '.join(where)}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            params,
+        )
+
+    async def mark_messages_duplicate(self, duplicate_of: dict[int, int]) -> None:
+        now = utc_now()
+        conn = await self._connect()
+        try:
+            for message_id, representative_id in duplicate_of.items():
+                if int(message_id) == int(representative_id):
+                    continue
+                await conn.execute(
+                    """
+                    UPDATE messages
+                    SET duplicate_of=?,ai_enrichment_status='duplicate',updated_at=?
+                    WHERE id=?
+                    """,
+                    (int(representative_id), now, int(message_id)),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+    async def collapse_incoming_duplicate(self, message_id: int) -> int | None:
+        row = await self.get_message(message_id)
+        if not row or row.get("duplicate_of"):
+            return None
+        body = message_body(row)
+        if not body:
+            return None
+        recent = await self.recent_message_bodies_for_duplicate_compare(
+            exclude_ids=[message_id],
+            days=7,
+            limit=800,
+        )
+        for other in recent:
+            if is_near_duplicate(body, message_body(other)):
+                representative = int(other.get("duplicate_of") or other["id"])
+                await self.mark_messages_duplicate({int(message_id): representative})
+                return representative
+        return None
+
     async def list_unanalyzed_message_ids(
         self, *, limit: int = 100, start_at: str | None = None
     ) -> list[int]:
@@ -6535,6 +6639,8 @@ class Database:
             "status <> 'rejected'",
             "(TRIM(COALESCE(text,''))<>'' OR TRIM(COALESCE(caption,''))<>'')",
             "(analysis_content_type IS NULL OR TRIM(analysis_content_type)='')",
+            "IFNULL(duplicate_of,0)=0",
+            "IFNULL(ai_enrichment_status,'') NOT IN ('validated','duplicate')",
         ]
         params: list[Any] = []
         if start_at:

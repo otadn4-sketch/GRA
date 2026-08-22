@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#008080">
   <title>سامانه خبرنامه گرایه</title>
-  <link rel="stylesheet" href="/admin/assets/app.css?v=12.2.1">
+  <link rel="stylesheet" href="/admin/assets/app.css?v=12.3.0">
 </head>
 <body>
   <div class="app-shell">
@@ -48,7 +48,6 @@
           <summary><span>⚙</span><b>تنظیمات</b><i aria-hidden="true">‹</i></summary>
           <div class="nav-submenu">
             <span class="nav-submenu-title">تنظیمات</span>
-            <button class="nav-item nav-sub-item" data-page="automation"><span>↻</span> خودکارسازی</button>
             <button class="nav-item nav-sub-item" data-page="sources"><span>⌁</span> منابع پایش</button>
             <button class="nav-item nav-sub-item" data-page="portal"><span>♟</span> پرتال کاربری</button>
             <button class="nav-item nav-sub-item" data-page="users" data-permission="users.manage"><span>♟</span> کاربران و دسترسی</button>
@@ -59,7 +58,7 @@
       </nav>
       <div class="sidebar-foot">
           <span class="live-dot"></span>
-        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۲.۲.۱</span></small></div>
+        <div><b id="sidebarFooterTitle">سامانه گرایه</b><small><span id="connectionLabel">در حال بررسی اتصال…</span> · نسخه <span id="sidebarVersion">۱۲.۳.۰</span></small></div>
       </div>
     </aside>
 
@@ -302,47 +301,6 @@
                 <label>تصویر پروفایل<input id="portalPortrait" type="file" accept="image/png,image/jpeg,image/webp"></label>
               </div>
               <div class="button-row"><button type="submit" class="primary-button">ذخیره تغییرات پرتال</button></div>
-            </form>
-          </article>
-        </section>
-
-        <section class="page" id="page-automation">
-          <article class="panel automation-overview">
-            <div class="panel-heading"><div><span class="eyebrow">خودکارسازی تحریریه</span><h3>کنترل مستقل تحلیل، پیش‌نویس و کرول بله</h3><p>هر فرایند از زمان انتخابی شما به بعد عمل می‌کند و بدون وابستگی به فرایند دیگر قابل شروع یا توقف است.</p></div><span id="automationStatusBadge" class="status-pill pending">در حال دریافت وضعیت</span></div>
-            <div id="automationStatusDetails" class="automation-status-details"></div>
-          </article>
-
-          <div class="automation-stage-grid">
-            <article class="panel automation-panel" id="automationAnalysis">
-              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ اول · هر ۱۰ دقیقه</span><h3>تحلیل خودکار پیام‌ها</h3><p>تشخیص گوینده، محل بیان، رویداد و تگ‌ها؛ موارد نامطمئن به کنترل انسانی می‌روند.</p></div><span id="analysisAutomationBadge" class="status-pill pending">متوقف</span></div>
-              <div class="form-grid two automation-start-fields">
-                <label>شروع از روز (جلالی)<input id="analysisAutomationStartDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۷" autocomplete="off" data-jalali-date></label>
-                <label>ساعت شروع<input id="analysisAutomationStartTime" type="time" dir="ltr" step="60"></label>
-              </div>
-              <div class="automation-actions"><button type="button" class="primary-button" id="startEditorialAutomation">شروع تحلیل خودکار</button><button type="button" class="ghost-button" id="stopEditorialAutomation">توقف تحلیل</button><button type="button" class="outline-button" id="runEditorialAnalysisNow">اجرای فوری همان بازه</button></div>
-            </article>
-            <article class="panel automation-panel" id="automationDrafts">
-              <div class="panel-heading"><div><span class="eyebrow">مرحلهٔ دوم · هر ۳ ساعت</span><h3>تولید خودکار پیش‌نویس</h3><p>فقط خبرهای تحلیل‌شده و شناسنامه‌ای را به پیش‌نویس با خلاصه‌ها و جزئیات تبدیل می‌کند.</p></div><span id="draftAutomationBadge" class="status-pill pending">متوقف</span></div>
-              <div class="form-grid two automation-start-fields">
-                <label>شروع از روز (جلالی)<input id="draftAutomationStartDate" class="jalali-date-input" type="text" inputmode="numeric" dir="rtl" placeholder="۱۴۰۵/۰۵/۰۷" autocomplete="off" data-jalali-date></label>
-                <label>ساعت شروع<input id="draftAutomationStartTime" type="time" dir="ltr" step="60"></label>
-              </div>
-              <div class="automation-actions"><button type="button" class="primary-button" id="startEditorialDraftAutomation">شروع تولید پیش‌نویس</button><button type="button" class="ghost-button" id="stopEditorialDraftAutomation">توقف تولید پیش‌نویس</button><button type="button" class="outline-button" id="runEditorialDraftsNow">اجرای فوری همان بازه</button></div>
-            </article>
-          </div>
-
-          <article class="panel human-control-panel" id="automationHumanControl">
-            <div class="panel-heading"><div><span class="eyebrow">کنترل انسانی</span><h3>بررسی پیام و نامزد گوینده</h3><p>ابتدا متن پیام، سپس نامزد و شواهد یافت‌شده نشان داده می‌شود. می‌توانید آن را با شناسنامه تطبیق دهید، به شناسنامه بیفزایید یا رد کنید.</p></div><button type="button" class="icon-button" id="refreshHumanControl" title="تازه‌سازی">↻</button></div>
-            <div id="humanControlList" class="human-control-list"><div class="empty-mini">در حال دریافت موارد کنترل انسانی…</div></div>
-          </article>
-
-          <article class="panel crawler-automation-panel" id="automationCrawler">
-            <div class="panel-heading"><div><span class="eyebrow">Selenium · بله</span><h3>کرولر کانال‌های عمومی</h3><p>فهرست کانال، روشن/خاموش‌بودن و اجرای سرویس کرولر را از همینجا مدیریت کنید.</p></div><span id="crawlerBadge" class="status-pill pending">در حال بررسی</span></div>
-            <form id="crawlerChannelsForm" class="inline-form always-visible">
-              <div class="crawler-runtime-control"><div><b>اجازهٔ کرول دوره‌ای</b><p>با توقف، کانال در حال پردازش کامل می‌شود و دور تازه‌ای آغاز نخواهد شد.</p></div><button type="button" id="crawlerEnabledToggle" class="switch off" aria-pressed="false">خاموش</button></div>
-              <label>فهرست کانال‌ها<textarea id="crawlerChannels" rows="8" dir="ltr" placeholder="channel_username"></textarea></label>
-              <div id="crawlerHelp" class="permission-box"></div>
-              <div class="button-row"><button type="submit" class="outline-button">ذخیره فهرست</button><button type="button" class="primary-button" id="startCrawler">اجرای کرولر</button><button type="button" class="ghost-button" id="stopCrawler">توقف امن کرولر</button></div>
             </form>
           </article>
         </section>
@@ -832,6 +790,15 @@
             </form>
             <div id="sourcesGrid" class="source-cards"></div>
           </article>
+          <article class="panel crawler-automation-panel" id="sourcesCrawler">
+            <div class="panel-heading"><div><span class="eyebrow">Selenium · بله</span><h3>کرولر کانال‌های عمومی</h3><p>فهرست کانال، روشن/خاموش‌بودن و اجرای سرویس کرولر را از همینجا مدیریت کنید. خبر تکراری یا نزدیک‌به‌تکراری (۸۰٪) دوباره به مقصد ارسال نمی‌شود.</p></div><span id="crawlerBadge" class="status-pill pending">در حال بررسی</span></div>
+            <form id="crawlerChannelsForm" class="inline-form always-visible">
+              <div class="crawler-runtime-control"><div><b>اجازهٔ کرول دوره‌ای</b><p>با توقف، کانال در حال پردازش کامل می‌شود و دور تازه‌ای آغاز نخواهد شد.</p></div><button type="button" id="crawlerEnabledToggle" class="switch off" aria-pressed="false">خاموش</button></div>
+              <label>فهرست کانال‌ها<textarea id="crawlerChannels" rows="8" dir="ltr" placeholder="channel_username"></textarea></label>
+              <div id="crawlerHelp" class="permission-box"></div>
+              <div class="button-row"><button type="submit" class="outline-button">ذخیره فهرست</button><button type="button" class="primary-button" id="startCrawler">اجرای کرولر</button><button type="button" class="ghost-button" id="stopCrawler">توقف امن کرولر</button></div>
+            </form>
+          </article>
         </section>
 
         <section class="page" id="page-users">
@@ -944,7 +911,7 @@
     <div class="jalali-picker-actions"><button type="button" class="text-button" id="jalaliPickerToday">امروز</button><button type="button" class="text-button" id="jalaliPickerClose">بستن</button></div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin/assets/wordcloud-layout.js?v=12.2.1" defer></script>
-  <script src="/admin/assets/app.js?v=12.2.1" defer></script>
+  <script src="/admin/assets/wordcloud-layout.js?v=12.3.0" defer></script>
+  <script src="/admin/assets/app.js?v=12.3.0" defer></script>
 </body>
 </html>

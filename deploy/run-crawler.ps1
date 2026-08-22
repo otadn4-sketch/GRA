@@ -25,7 +25,7 @@ foreach ($line in Get-Content -LiteralPath $envPath) {
 
 Set-Location -LiteralPath $projectRoot
 $env:PYTHONIOENCODING = "utf-8"
-$arguments = @("crawler\bale_crawler_api_sender.py")
+$arguments = @("-m", "app.crawler_launcher")
 if ($Once) { $arguments += "--once" }
 & $python @arguments
 exit $LASTEXITCODE

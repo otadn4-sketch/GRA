@@ -138,6 +138,7 @@ class Settings:
     bulletin_max_messages: int
     bulletin_output_dir: Path
     bulletin_near_duplicate_threshold: float
+    analysis_near_duplicate_threshold: float
     bulletin_min_summary_coverage: float
     bulletin_max_summary_chars: int
     bulletin_ai_max_retries: int
@@ -385,6 +386,10 @@ def load_settings() -> Settings:
         bulletin_max_messages=int(os.getenv("BULLETIN_MAX_MESSAGES", "500")),
         bulletin_output_dir=(PROJECT_ROOT / os.getenv("BULLETIN_OUTPUT_DIR", "data/bulletins")).resolve() if not Path(os.getenv("BULLETIN_OUTPUT_DIR", "data/bulletins")).is_absolute() else Path(os.getenv("BULLETIN_OUTPUT_DIR", "data/bulletins")).resolve(),
         bulletin_near_duplicate_threshold=float(os.getenv("BULLETIN_NEAR_DUPLICATE_THRESHOLD", "0.86")),
+        analysis_near_duplicate_threshold=max(
+            0.5,
+            min(1.0, float(os.getenv("ANALYSIS_NEAR_DUPLICATE_THRESHOLD", "0.80"))),
+        ),
         bulletin_min_summary_coverage=float(os.getenv("BULLETIN_MIN_SUMMARY_COVERAGE", "0.35")),
         bulletin_max_summary_chars=int(os.getenv("BULLETIN_MAX_SUMMARY_CHARS", "650")),
         bulletin_ai_max_retries=max(3, int(os.getenv("BULLETIN_AI_MAX_RETRIES", "3"))),

@@ -590,6 +590,7 @@ async def handle_source_message(
 
     try:
         message_db_id = await db.upsert_message(message, received_at=received_at)
+        await db.collapse_incoming_duplicate(message_db_id)
     except Exception as exc:
         await db.record_monitored_chat_error(chat_id, exc)
         raise

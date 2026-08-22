@@ -509,8 +509,6 @@ def create_dashboard_router(
             return "people.manage"
         if path.startswith("/admin/api/analysis") and method != "GET":
             return "people.manage"
-        if path.startswith("/admin/api/editorial-automation") and method != "GET":
-            return "editorial.manage"
         if path.startswith("/admin/api/messages") and method != "GET":
             return "messages.review"
         if path.startswith("/admin/api/editorial-drafts") and method != "GET":
@@ -1342,14 +1340,6 @@ def create_dashboard_router(
                 payload.message_ids,
                 actor=actor,
             )
-            resolved_ids = [
-                int(item["message_id"])
-                for item in result.get("results", [])
-                if item.get("ok") and item.get("message_id") is not None
-            ]
-            result["human_control_candidates"] = await editorial_automation.reconcile_speakers(
-                resolved_ids
-            )
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
         await audit(
@@ -1364,103 +1354,6 @@ def create_dashboard_router(
                 "prompt_version": result.get("prompt_version"),
             },
         )
-        return result
-
-    @router.get("/admin/api/editorial-automation")
-    async def editorial_automation_status(_: str = Depends(admin_identity)) -> dict[str, Any]:
-        return await editorial_automation.status()
-
-    @router.post("/admin/api/editorial-automation/analysis/start")
-    async def start_editorial_automation(
-        payload: AutomationStageStart,
-        request: Request,
-        actor: str = Depends(admin_identity),
-    ) -> dict[str, Any]:
-        try:
-            start_at = _automation_start_to_utc_iso(payload)
-            state = await editorial_automation.enable_analysis(start_at=start_at)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        await db.add_system_event(
-            "editorial_automation", "INFO", "analysis_automation_started",
-            "Operator enabled the ten-minute first-stage analysis.",
-            {"actor": actor, "start_at": start_at},
-        )
-        await audit(
-            request, actor, "editorial_automation_analysis_started",
-            object_type="editorial_automation", details={"start_at": start_at},
-        )
-        return state
-
-    @router.post("/admin/api/editorial-automation/analysis/stop")
-    async def stop_editorial_automation(
-        request: Request, actor: str = Depends(admin_identity)
-    ) -> dict[str, Any]:
-        state = await editorial_automation.disable_analysis()
-        await db.add_system_event(
-            "editorial_automation", "INFO", "analysis_automation_stopped",
-            "Operator paused the automated editorial workflow.", {"actor": actor},
-        )
-        await audit(request, actor, "editorial_automation_stopped", object_type="editorial_automation")
-        return state
-
-    @router.post("/admin/api/editorial-automation/drafts/start")
-    async def start_editorial_drafts_automation(
-        payload: AutomationStageStart,
-        request: Request,
-        actor: str = Depends(admin_identity),
-    ) -> dict[str, Any]:
-        try:
-            start_at = _automation_start_to_utc_iso(payload)
-            state = await editorial_automation.enable_drafts(start_at=start_at)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        await db.add_system_event(
-            "editorial_automation", "INFO", "draft_automation_started",
-            "Operator enabled the three-hour second-stage draft generation.",
-            {"actor": actor, "start_at": start_at},
-        )
-        await audit(
-            request, actor, "editorial_automation_drafts_started",
-            object_type="editorial_automation", details={"start_at": start_at},
-        )
-        return state
-
-    @router.post("/admin/api/editorial-automation/drafts/stop")
-    async def stop_editorial_drafts_automation(
-        request: Request, actor: str = Depends(admin_identity)
-    ) -> dict[str, Any]:
-        state = await editorial_automation.disable_drafts()
-        await db.add_system_event(
-            "editorial_automation", "INFO", "draft_automation_stopped",
-            "Operator paused the automated second-stage draft generation.", {"actor": actor},
-        )
-        await audit(
-            request, actor, "editorial_automation_drafts_stopped",
-            object_type="editorial_automation",
-        )
-        return state
-
-    @router.post("/admin/api/editorial-automation/analysis/run-now")
-    async def run_editorial_analysis_now(
-        request: Request, actor: str = Depends(admin_identity)
-    ) -> dict[str, Any]:
-        try:
-            result = await editorial_automation.run_analysis_now()
-        except RuntimeError as exc:
-            raise HTTPException(503, str(exc)) from exc
-        await audit(request, actor, "editorial_automation_analysis_run_now", object_type="editorial_automation")
-        return result
-
-    @router.post("/admin/api/editorial-automation/drafts/run-now")
-    async def run_editorial_drafts_now(
-        request: Request, actor: str = Depends(admin_identity)
-    ) -> dict[str, Any]:
-        try:
-            result = await editorial_automation.run_drafts_now()
-        except RuntimeError as exc:
-            raise HTTPException(503, str(exc)) from exc
-        await audit(request, actor, "editorial_automation_draft_run_now", object_type="editorial_automation")
         return result
 
     @router.get("/admin/api/analysis/filters")
@@ -1941,7 +1834,6 @@ def create_dashboard_router(
                 "ai_concurrency_per_key": settings.ai_concurrency_per_key,
                 "ai_profiles": ai_runtime.get("profiles", {}),
                 "scheduler_enabled": settings.scheduler_enabled,
-                "editorial_automation": await editorial_automation.status(),
                 "crawler": {
                     "enabled": settings.crawler_enabled,
                     "channels_file": str(settings.crawler_channels_path),
@@ -2062,8 +1954,8 @@ def create_dashboard_router(
         starting it here therefore survives page reloads and avoids a second
         process when it is already running.
         """
-        script_path = (WEB_ROOT.parent / "crawler" / "bale_crawler_api_sender.py").resolve()
-        if not script_path.is_file():
+        worker_path = (WEB_ROOT.parent / "crawler" / "bale_crawler_api_sender.py").resolve()
+        if not worker_path.is_file():
             raise HTTPException(503, "فایل اجرایی کرولر پیدا نشد.")
         old_pid = crawler_process_id()
         if crawler_is_running(old_pid):
@@ -2083,7 +1975,7 @@ def create_dashboard_router(
             stderr_handle = stderr_path.open("ab")
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             process = subprocess.Popen(
-                [sys.executable, str(script_path)],
+                [sys.executable, "-m", "app.crawler_launcher"],
                 cwd=str(WEB_ROOT.parent),
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_handle,
@@ -2102,7 +1994,7 @@ def create_dashboard_router(
         await db.set_setting("crawler_runtime_enabled", "true")
         await db.add_system_event(
             "crawler", "INFO", "crawler_started_from_dashboard",
-            "Selenium crawler started from automation dashboard.",
+            "Selenium crawler started from monitoring sources.",
             {"actor": actor, "pid": process.pid},
         )
         await audit(request, actor, "crawler_started", object_type="crawler", details={"pid": process.pid})

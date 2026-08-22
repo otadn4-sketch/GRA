@@ -25,11 +25,18 @@ from .bulletin_pipeline import (
 from .config import Settings
 from .db import Database
 from .editorial_rebuild import EditorialRebuilder, load_editorial_package
+from .near_duplicate import choose_representatives
 from .persian_text import canonical_key, normalize_persian
+from .speaker_grounding import (
+    evidence_supports_name,
+    grounding_span,
+    is_title_only_name,
+    may_bind_short_name,
+)
 
 logger = logging.getLogger("prasad.bulletins")
 
-SELECTED_ANALYSIS_PROMPT_VERSION = "garaye-registry-match-v4"
+SELECTED_ANALYSIS_PROMPT_VERSION = "garaye-registry-match-v5"
 EDITORIAL_SPEAKER_PROMPT_VERSION = "garaye-speaker-summaries-v2"
 EDITORIAL_EVENT_PROMPT_VERSION = "garaye-event-summaries-v1"
 HIGH_ATTENTION_PROMPT_VERSION = "garaye-high-attention-v2"
@@ -494,18 +501,25 @@ class BulletinService:
         return len(overlap) >= max(1, min(len(left_words), len(right_words)) - 1)
 
     async def _match_speakers_to_registry(
-        self, speakers: list[dict[str, Any]]
+        self,
+        speakers: list[dict[str, Any]],
+        *,
+        message_text: str,
     ) -> list[dict[str, Any]]:
         """Apply post-extraction registry identity matching without inventing fields.
 
         Rules (engine-one only):
         1. No name/position → leave untouched; never invent from registry.
-        2. Match extracted name against canonical name + aliases.
-        3. Use extracted position only to disambiguate same-name people.
-        4. Unique certain match → replace name with registry canonical full_name.
-        5. Normalize position only when it is the same role with different wording.
-        6-8. Ambiguous / no match → keep the initial extraction exactly.
-        9. Other analysis fields remain unchanged by the caller.
+        2. Title-only labels are not names.
+        3. Match extracted name against canonical name + aliases.
+        4. Bind only when a name/alias actually appears in the message text.
+        5. If evidence is present, it must be a substring of the text and contain
+           the grounded name.
+        6. Short single-token names bind only when that exact unique alias is the
+           grounded span.
+        7. Use extracted position only to disambiguate same-name people.
+        8. Unique grounded match → replace name with registry canonical full_name.
+        9. Ambiguous / ungrounded / no match → keep the initial extraction exactly.
         """
 
         matched: list[dict[str, Any]] = []
@@ -513,7 +527,11 @@ class BulletinService:
             item = dict(speaker)
             name = normalize_persian(str(item.get("name") or "")).strip()
             position = normalize_persian(str(item.get("position") or "")).strip()
-            if not name or name == "نامشخص":
+            evidence = normalize_persian(str(item.get("evidence") or "")).strip()
+            if not name or name == "نامشخص" or is_title_only_name(name):
+                if is_title_only_name(name) and name and name != "نامشخص":
+                    item["name"] = "نامشخص"
+                    item.pop("person_id", None)
                 matched.append(item)
                 continue
             candidates = await self.db.find_people_by_name(name)
@@ -530,7 +548,26 @@ class BulletinService:
             if len(candidates) != 1:
                 matched.append(item)
                 continue
-            person = candidates[0]
+            person = await self.db.get_person(int(candidates[0]["person_id"]))
+            if not person:
+                matched.append(item)
+                continue
+            aliases = [
+                str(row.get("alias_text") or "")
+                for row in person.get("alias_rows") or []
+            ]
+            grounded = grounding_span(
+                message_text,
+                extracted_name=name,
+                full_name=str(person.get("full_name") or ""),
+                aliases=aliases,
+            )
+            if not grounded or not may_bind_short_name(name, grounded):
+                matched.append(item)
+                continue
+            if not evidence_supports_name(message_text, evidence, grounded):
+                matched.append(item)
+                continue
             item["name"] = str(person.get("full_name") or name)
             item["person_id"] = int(person["person_id"])
             registry_position = normalize_persian(str(person.get("position") or "")).strip()
@@ -582,8 +619,12 @@ class BulletinService:
                 prompt_version=SELECTED_ANALYSIS_PROMPT_VERSION,
             )
             analysis = self._validate_selected_analysis_payload(parsed)
-            # Phase 2: registry matching happens only after text-only extraction.
-            speakers = await self._match_speakers_to_registry(analysis["speakers"])
+            # Phase 2: registry matching happens only after text-only extraction
+            # and only when a name/alias actually appears in this message.
+            speakers = await self._match_speakers_to_registry(
+                analysis["speakers"],
+                message_text=text,
+            )
             analysis["speakers"] = speakers
             tags = await self.db.replace_message_speaker_tags(
                 message_id,
@@ -638,13 +679,63 @@ class BulletinService:
         if len(unique_ids) > 200:
             raise RuntimeError("در هر نوبت حداکثر ۲۰۰ پیام قابل تحلیل است.")
 
+        selected_rows = await self.db.messages_for_duplicate_compare(unique_ids)
+        already_duplicate = {
+            int(row["id"]): int(row["duplicate_of"] or row["id"])
+            for row in selected_rows
+            if row.get("duplicate_of")
+            or str(row.get("ai_enrichment_status") or "").lower() == "duplicate"
+        }
+        fresh_rows = [
+            row for row in selected_rows if int(row["id"]) not in already_duplicate
+        ]
+        existing_rows = await self.db.recent_message_bodies_for_duplicate_compare(
+            exclude_ids=unique_ids,
+            days=7,
+            limit=800,
+        )
+        claimed_existing = [
+            row
+            for row in existing_rows
+            if row.get("duplicate_of")
+            or str(row.get("ai_enrichment_status") or "").lower()
+            in {"validated", "duplicate"}
+        ]
+        claimed_ids = {int(row["id"]) for row in claimed_existing}
+        pending_existing = [
+            row for row in existing_rows if int(row["id"]) not in claimed_ids
+        ]
+        representatives, duplicate_of = choose_representatives(
+            [*fresh_rows, *pending_existing],
+            threshold=self.settings.analysis_near_duplicate_threshold,
+            existing=claimed_existing,
+        )
+        duplicate_of = {**already_duplicate, **duplicate_of}
+        skipped_results: list[dict[str, Any]] = []
+        if duplicate_of:
+            await self.db.mark_messages_duplicate(duplicate_of)
+            skipped_results = [
+                {
+                    "message_id": message_id,
+                    "ok": True,
+                    "skipped": "duplicate",
+                    "duplicate_of": representative_id,
+                }
+                for message_id, representative_id in duplicate_of.items()
+            ]
+        analyze_ids = [
+            message_id
+            for message_id in unique_ids
+            if message_id in set(representatives) and message_id not in duplicate_of
+        ]
+
         # The pool rotates calls across configured API keys.  A local limiter
         # prevents a large UI selection from creating more work than the
         # configured key/concurrency budget can serve at once.
         parallelism = max(
             1,
             min(
-                len(unique_ids),
+                max(len(analyze_ids), 1),
                 self.settings.ai_max_concurrency,
                 self.pipeline.ai_key_pool.key_count,
             ),
@@ -655,15 +746,19 @@ class BulletinService:
             async with limiter:
                 return await self._analyze_selected_message(message_id, actor=actor)
 
-        results = list(
-            await asyncio.gather(*(analyze_bounded(message_id) for message_id in unique_ids))
-        )
-        succeeded = sum(1 for result in results if result.get("ok"))
+        analyzed = list(
+            await asyncio.gather(*(analyze_bounded(message_id) for message_id in analyze_ids))
+        ) if analyze_ids else []
+        results = analyzed + skipped_results
+        analyzed_ok = sum(1 for result in analyzed if result.get("ok"))
+        failed = sum(1 for result in analyzed if not result.get("ok"))
         return {
-            "ok": succeeded == len(unique_ids),
+            "ok": failed == 0,
             "requested": len(unique_ids),
-            "succeeded": succeeded,
-            "failed": len(unique_ids) - succeeded,
+            "succeeded": analyzed_ok,
+            "failed": failed,
+            "analyzed": analyzed_ok,
+            "skipped_duplicates": len(duplicate_of),
             "results": results,
             "prompt_version": SELECTED_ANALYSIS_PROMPT_VERSION,
             "parallelism": parallelism,
