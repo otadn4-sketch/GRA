@@ -4270,12 +4270,9 @@ async function loadQuickStart() {
     const progress = await refreshQuickStartAnalysis();
     if (!progress) {
       setQuickStartStep(1);
-    } else if (Number(progress.remaining || 0)) {
-      await runQuickStartAnalysis({autoAdvance: true});
-    } else if (!qsAnalysisInFlight) {
+    } else if (!Number(progress.remaining || 0) && !qsAnalysisInFlight) {
       state.quickStart.analysisDone = true;
       persistQuickStart();
-      setQuickStartStep(3);
     }
   }
   if (state.quickStart.step === 3) await refreshQuickStartFinalization();
@@ -4389,8 +4386,8 @@ async function runQuickStartAnalysis({autoAdvance = true} = {}) {
         toast("تحلیل متوقف شد؛ این مرحله را دوباره انتخاب کنید تا ادامه یابد.", true);
         return;
       }
-      for (let index = 0; index < ids.length; index += 200) {
-        const batch = ids.slice(index, index + 200);
+      for (let index = 0; index < ids.length; index += 25) {
+        const batch = ids.slice(index, index + 25);
         await api("/admin/api/messages/analyze", {method: "POST", body: JSON.stringify({message_ids: batch})});
         renderQuickStartProgress({
           total: progress.total || ids.length,
@@ -4955,12 +4952,7 @@ document.querySelectorAll(".qs-step-tab").forEach((tab) => tab.addEventListener(
   if (!canEnterQuickStartStep(step)) return;
   setQuickStartStep(step);
   if (step === 2) {
-    refreshQuickStartAnalysis().then((progress) => {
-      if (!state.quickStart.analysisDone || Number(progress?.remaining || 0)) {
-        return runQuickStartAnalysis({autoAdvance: !state.quickStart.analysisDone});
-      }
-      return null;
-    }).catch((error) => toast(error.message, true));
+    refreshQuickStartAnalysis().catch((error) => toast(error.message, true));
     return;
   }
   if (step === 3) refreshQuickStartFinalization().catch((error) => toast(error.message, true));
@@ -4968,6 +4960,7 @@ document.querySelectorAll(".qs-step-tab").forEach((tab) => tab.addEventListener(
   if (step === 5) refreshQuickStartOutput({fillDays: true}).catch((error) => toast(error.message, true));
 }));
 $("qsConfirmWindow")?.addEventListener("click", () => confirmQuickStartWindow().catch((error) => toast(error.message, true)));
+$("qsStartAnalysis")?.addEventListener("click", () => runQuickStartAnalysis({autoAdvance: true}).catch((error) => toast(error.message, true)));
 $("qsBackToWindow")?.addEventListener("click", () => {
   if (!canEnterQuickStartStep(1)) return;
   setQuickStartStep(1);
@@ -4975,12 +4968,7 @@ $("qsBackToWindow")?.addEventListener("click", () => {
 $("qsBackToAnalysis")?.addEventListener("click", () => {
   if (!canEnterQuickStartStep(2)) return;
   setQuickStartStep(2);
-  refreshQuickStartAnalysis().then((progress) => {
-    if (Number(progress?.remaining || 0)) {
-      return runQuickStartAnalysis({autoAdvance: true});
-    }
-    return null;
-  }).catch((error) => toast(error.message, true));
+  refreshQuickStartAnalysis().catch((error) => toast(error.message, true));
 });
 $("qsGoHighAttention")?.addEventListener("click", () => {
   if (!canEnterQuickStartStep(4)) return;

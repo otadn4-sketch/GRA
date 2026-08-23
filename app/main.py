@@ -1517,15 +1517,19 @@ async def lifespan(_: FastAPI):
             await bulletin_scheduler.start()
             await editorial_automation.start()
             recovered_runs = await db.recover_incomplete_bulletin_runs()
-            for run_id in recovered_runs:
-                observe_background_task(
-                    asyncio.create_task(
-                        bulletin_service.execute_run(run_id),
-                        name=f"recovered-bulletin-{run_id}",
-                    )
-                )
             if recovered_runs:
-                logger.info("Recovered %s queued bulletin run(s)", len(recovered_runs))
+                logger.warning(
+                    "Not auto-resuming %s interrupted bulletin run(s): %s",
+                    len(recovered_runs),
+                    recovered_runs,
+                )
+                for run_id in recovered_runs:
+                    await db.fail_bulletin_run(
+                        run_id,
+                        "قطع شد (ری‌استارت سرویس). در صورت نیاز از داشبورد دوباره اجرا کنید.",
+                        stage="interrupted",
+                        error_type="InterruptedByRestart",
+                    )
             if settings.bot_mode == "polling":
                 polling_task = observe_background_task(
                     asyncio.create_task(polling_loop(), name="bale-polling")

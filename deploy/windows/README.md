@@ -135,7 +135,7 @@ curl.exe http://127.0.0.1:8000/health
 خروجی سالم:
 
 ```json
-{"status":"ok","ok":true,"version":"12.3.1"}
+{"status":"ok","ok":true,"version":"12.3.2"}
 ```
 
 `ok: true` فقط برای سازگاری با اسکریپت‌های قبلی است. خود endpoint سبک است و به دیتابیس یا AI دست نمی‌زند.
