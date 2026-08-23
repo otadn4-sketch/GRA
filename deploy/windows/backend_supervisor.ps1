@@ -12,7 +12,7 @@ param(
     [int]$HealthIntervalSeconds = 30,
     [int]$HealthTimeoutSeconds = 10,
     [int]$FailThreshold = 3,
-    [int]$StartupGraceSeconds = 45,
+    [int]$StartupGraceSeconds = 180,
     [int]$CooldownSeconds = 15
 )
 
@@ -123,22 +123,54 @@ function Stop-GarayeChild {
     }
 }
 
+function Write-GarayeLogTail {
+    param([string]$Path, [int]$Lines = 40)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    try {
+        $tail = (Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction SilentlyContinue) -join "`n"
+        if ($tail) {
+            Write-GarayeLog -Level "ERROR" -Message ("{0} tail:`n{1}" -f $Path, $tail)
+        }
+    }
+    catch { }
+}
+
 function Wait-GarayeStartup {
     param([System.Diagnostics.Process]$Process)
     $deadline = (Get-Date).AddSeconds($StartupGraceSeconds)
+    $nextLog = Get-Date
+    $lastProbe = $null
     while ((Get-Date) -lt $deadline) {
         if ($Process.HasExited) {
             Write-GarayeLog -Level "ERROR" -Message "uvicorn exited during startup. ExitCode=$($Process.ExitCode)"
+            Write-GarayeLogTail -Path $script:UvicornErrLog
             return $false
         }
-        if (Test-GarayeHealthOk -HealthUri $healthUri -TimeoutSec $HealthTimeoutSeconds) {
+        $probe = Invoke-GarayeHealthProbe -HealthUri $healthUri -TimeoutSec $HealthTimeoutSeconds
+        $lastProbe = $probe
+        if ($probe.Ok) {
             Write-GarayeLog "Health OK after startup pid=$($Process.Id) uri=$healthUri"
             return $true
+        }
+        if ((Get-Date) -ge $nextLog) {
+            $snippet = (([string]$probe.Body) -replace "\s+", " ")
+            if ($snippet.Length -gt 160) { $snippet = $snippet.Substring(0, 160) }
+            Write-GarayeLog -Level "WARN" -Message ("Waiting for health uri={0} http={1} error={2} body={3}" -f $healthUri, $probe.StatusCode, $probe.Error, $snippet)
+            $nextLog = (Get-Date).AddSeconds(10)
         }
         Start-Sleep -Seconds 1
         if (Test-Path -LiteralPath $script:StopFlag) { return $false }
     }
-    Write-GarayeLog -Level "ERROR" -Message "Health check did not succeed within $StartupGraceSeconds seconds."
+    $snippet = ""
+    if ($lastProbe) {
+        $snippet = (([string]$lastProbe.Body) -replace "\s+", " ")
+        if ($snippet.Length -gt 200) { $snippet = $snippet.Substring(0, 200) }
+        Write-GarayeLog -Level "ERROR" -Message ("Health check did not succeed within {0} seconds. uri={1} http={2} error={3} body={4}" -f $StartupGraceSeconds, $healthUri, $lastProbe.StatusCode, $lastProbe.Error, $snippet)
+    }
+    else {
+        Write-GarayeLog -Level "ERROR" -Message "Health check did not succeed within $StartupGraceSeconds seconds."
+    }
+    Write-GarayeLogTail -Path $script:UvicornErrLog
     return $false
 }
 

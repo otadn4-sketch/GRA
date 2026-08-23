@@ -257,6 +257,19 @@ netstat -ano | findstr :8000
 .\deploy\windows\install_backend_task.ps1
 ```
 
+اگر ناظر `Started uvicorn` می‌نویسد ولی بعد از ۴۵ ثانیه health fail می‌شود، uvicorn زنده است اما `GET /health` هنوز OK نشده. در پنجرهٔ دوم:
+
+```powershell
+curl.exe -sS -D - --noproxy "*" http://127.0.0.1:8000/health
+netstat -ano | findstr :8000
+Test-Path .\app\health.py
+Get-Content .\logs\uvicorn.err.log -Tail 80
+```
+
+- `404` یعنی فایل `app\health.py` روی سرور نیست؛ از همین شاخه کپی کنید.
+- اتصال برقرار نمی‌شود یعنی هنوز LISTENING نیست یا import/startup گیر کرده؛ `uvicorn.err.log` را بخوانید.
+- `200` با `{"status":"ok"...}` یعنی اپ سالم است و باید مهلت startup را زیاد کنید: `-StartupGraceSeconds 180`.
+
 ## ۸) تشخیص مشکل 502
 
 

@@ -1495,29 +1495,35 @@ async def lifespan(_: FastAPI):
             logger.warning("INPUT_MODE=miniapp است اما MINIAPP_BASE_URL تنظیم نشده؛ فرم‌های لینک و خطابه باز نخواهند شد.")
         if settings.dashboard_enabled and not settings.admin_password:
             logger.warning("Dashboard enabled but ADMIN_PASSWORD is empty; /admin will return 503")
-        if settings.bot_mode != "disabled":
-            await cleanup_legacy_channel_interactions()
-            await reconcile_message_keyboards()
-        await bulletin_scheduler.start()
-        await editorial_automation.start()
-        recovered_runs = await db.recover_incomplete_bulletin_runs()
-        for run_id in recovered_runs:
-            observe_background_task(
-                asyncio.create_task(
-                    bulletin_service.execute_run(run_id),
-                    name=f"recovered-bulletin-{run_id}",
-                )
-            )
-        if recovered_runs:
-            logger.info("Recovered %s queued bulletin run(s)", len(recovered_runs))
-        if settings.bot_mode == "polling":
-            polling_task = observe_background_task(
-                asyncio.create_task(polling_loop(), name="bale-polling")
-            )
         asyncio.get_running_loop().set_exception_handler(asyncio_exception_handler)
-        logger.info("Application startup complete version=%s", __version__)
-        await db.add_system_event("app", "INFO", "startup", f"Garaye Newsletter v{__version__} started")
+
+        async def complete_startup() -> None:
+            global polling_task
+            if settings.bot_mode != "disabled":
+                await cleanup_legacy_channel_interactions()
+                await reconcile_message_keyboards()
+            await bulletin_scheduler.start()
+            await editorial_automation.start()
+            recovered_runs = await db.recover_incomplete_bulletin_runs()
+            for run_id in recovered_runs:
+                observe_background_task(
+                    asyncio.create_task(
+                        bulletin_service.execute_run(run_id),
+                        name=f"recovered-bulletin-{run_id}",
+                    )
+                )
+            if recovered_runs:
+                logger.info("Recovered %s queued bulletin run(s)", len(recovered_runs))
+            if settings.bot_mode == "polling":
+                polling_task = observe_background_task(
+                    asyncio.create_task(polling_loop(), name="bale-polling")
+                )
+            logger.info("Background application startup complete version=%s", __version__)
+            await db.add_system_event("app", "INFO", "startup", f"Garaye Newsletter v{__version__} started")
+
+        observe_background_task(asyncio.create_task(complete_startup(), name="garaye-complete-startup"))
         started = True
+        logger.info("HTTP listener ready version=%s; remaining startup continues in background", __version__)
         yield
     except Exception:
         if not started:

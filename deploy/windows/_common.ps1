@@ -257,18 +257,101 @@ function Stop-GarayeProcessTree {
     & "$env:SystemRoot\System32\taskkill.exe" /PID $ProcessId /T /F | Out-Null
 }
 
+function Invoke-GarayeHealthProbe {
+    param(
+        [string]$HealthUri,
+        [int]$TimeoutSec = 10
+    )
+    $result = [pscustomobject]@{
+        Ok         = $false
+        StatusCode = 0
+        Body       = ""
+        Error      = ""
+    }
+    $curl = Join-Path $env:SystemRoot "System32\curl.exe"
+    if (Test-Path -LiteralPath $curl) {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $raw = & $curl -sS -g --noproxy "*" --max-time $TimeoutSec -w "`n__STATUS__:%{http_code}" $HealthUri 2>&1 | Out-String
+            $raw = $raw.Trim()
+            if ($raw -match '(?s)^(.*)__STATUS__:(\d+)\s*$') {
+                $result.Body = $Matches[1].Trim()
+                $result.StatusCode = [int]$Matches[2]
+            }
+            else {
+                $result.Error = $raw
+            }
+        }
+        catch {
+            $result.Error = $_.Exception.Message
+        }
+        finally {
+            $ErrorActionPreference = $previous
+        }
+    }
+    else {
+        try {
+            $request = [System.Net.HttpWebRequest]::Create($HealthUri)
+            $request.Method = "GET"
+            $request.Timeout = [Math]::Max(1000, $TimeoutSec * 1000)
+            $request.ReadWriteTimeout = $request.Timeout
+            $request.Proxy = [System.Net.GlobalProxySelection]::GetEmptyWebProxy()
+            $request.UserAgent = "GarayeSupervisor"
+            $response = $request.GetResponse()
+            try {
+                $result.StatusCode = [int]$response.StatusCode
+                $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+                $result.Body = $reader.ReadToEnd()
+                $reader.Close()
+            }
+            finally {
+                $response.Close()
+            }
+        }
+        catch [System.Net.WebException] {
+            $result.Error = $_.Exception.Message
+            if ($_.Exception.Response) {
+                try {
+                    $result.StatusCode = [int]$_.Exception.Response.StatusCode
+                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                    $result.Body = $reader.ReadToEnd()
+                    $reader.Close()
+                }
+                catch { }
+            }
+        }
+        catch {
+            $result.Error = $_.Exception.Message
+        }
+    }
+    if ([int]$result.StatusCode -eq 200) {
+        $body = [string]$result.Body
+        if ($body -match '"status"\s*:\s*"ok"' -or $body -match '"ok"\s*:\s*true') {
+            $result.Ok = $true
+        }
+        elseif (-not $result.Error) {
+            $result.Error = "HTTP 200 but body was not a health OK payload"
+        }
+    }
+    elseif (-not $result.Error) {
+        if ([int]$result.StatusCode -eq 0) {
+            $result.Error = "no HTTP response"
+        }
+        else {
+            $result.Error = "HTTP $($result.StatusCode)"
+        }
+    }
+    return $result
+}
+
 function Test-GarayeHealthOk {
     param(
         [string]$HealthUri,
         [int]$TimeoutSec = 10
     )
     try {
-        $response = Invoke-WebRequest -UseBasicParsing -Method Get -Uri $HealthUri -TimeoutSec $TimeoutSec
-        if ([int]$response.StatusCode -ne 200) { return $false }
-        $body = $response.Content
-        if ($body -match '"status"\s*:\s*"ok"') { return $true }
-        if ($body -match '"ok"\s*:\s*true') { return $true }
-        return $false
+        return [bool]((Invoke-GarayeHealthProbe -HealthUri $HealthUri -TimeoutSec $TimeoutSec).Ok)
     }
     catch {
         return $false
