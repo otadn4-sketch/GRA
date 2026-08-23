@@ -103,17 +103,46 @@ function Get-RecordedPid {
     return $value
 }
 
+function ConvertTo-GarayePidArray {
+    param($Value)
+    $out = New-Object System.Collections.Generic.List[int]
+    $queue = New-Object System.Collections.Queue
+    [void]$queue.Enqueue($Value)
+    while ($queue.Count -gt 0) {
+        $cur = $queue.Dequeue()
+        if ($null -eq $cur -or $cur -eq "") { continue }
+        if ($cur -is [System.Array] -or ($cur -is [System.Collections.IEnumerable] -and -not ($cur -is [string]))) {
+            foreach ($item in @($cur)) { [void]$queue.Enqueue($item) }
+            continue
+        }
+        $n = 0
+        if ([int]::TryParse("$cur", [ref]$n) -and $n -gt 0 -and -not $out.Contains($n)) {
+            [void]$out.Add($n)
+        }
+    }
+    return $out
+}
+
+function ConvertTo-GarayePid {
+    param($Value)
+    foreach ($n in (ConvertTo-GarayePidArray $Value)) { return [int]$n }
+    return 0
+}
+
 function Get-GarayeProcess {
-    param([int]$ProcessId)
-    if ($ProcessId -le 0) { return $null }
-    return Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    param($ProcessId)
+    $id = ConvertTo-GarayePid $ProcessId
+    if ($id -le 0) { return $null }
+    return Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
 }
 
 function Test-GarayeOurUvicorn {
     param(
-        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)]$ProcessId,
         [int]$Port = 8000
     )
+    $ProcessId = ConvertTo-GarayePid $ProcessId
+    if ($ProcessId -le 0) { return $false }
     $proc = Get-GarayeProcess -ProcessId $ProcessId
     if (-not $proc) { return $false }
     $python = $null
@@ -139,32 +168,29 @@ function Test-GarayeOurUvicorn {
 function Get-ListeningPids {
     param([int]$Port)
     $ids = New-Object System.Collections.Generic.List[int]
-    $found = $false
-    try {
-        $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop
-        foreach ($conn in @($conns)) {
-            $owning = [int]$conn.OwningProcess
-            if ($owning -gt 0 -and -not $ids.Contains($owning)) { [void]$ids.Add($owning) }
-        }
-        $found = $true
-    }
-    catch {
-        $found = $false
-    }
-    if (-not $found) {
-        $pattern = ":$Port\s"
-        foreach ($line in (netstat -ano -p tcp)) {
-            if ($line -notmatch $pattern) { continue }
-            if ($line -notmatch "LISTENING\s+(\d+)\s*$") { continue }
-            $owning = [int]$Matches[1]
-            if ($owning -gt 0 -and -not $ids.Contains($owning)) { [void]$ids.Add($owning) }
+    $pattern = ":$Port\s"
+    foreach ($line in @(netstat -ano -p tcp)) {
+        if ($line -notmatch $pattern) { continue }
+        if ($line -notmatch "LISTENING\s+(\d+)\s*$") { continue }
+        $owning = 0
+        if ([int]::TryParse($Matches[1], [ref]$owning) -and $owning -gt 0 -and -not $ids.Contains($owning)) {
+            [void]$ids.Add($owning)
         }
     }
-    return ,$ids.ToArray()
+    return $ids
+}
+
+function Grant-GarayeSystemAccess {
+    $grant = icacls.exe $script:ProjectRoot /grant "NT AUTHORITY\SYSTEM:(OI)(CI)M" /T /C /Q 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-GarayeLog -Level "WARN" -Message "Could not grant SYSTEM modify on project folder: $grant"
+    }
 }
 
 function Get-ProcessCommandLine {
-    param([int]$ProcessId)
+    param($ProcessId)
+    $ProcessId = ConvertTo-GarayePid $ProcessId
+    if ($ProcessId -le 0) { return $null }
     $proc = Get-GarayeProcess -ProcessId $ProcessId
     if (-not $proc) { return $null }
     $exe = [string]$proc.ExecutablePath
@@ -176,7 +202,7 @@ function Get-ProcessCommandLine {
 
 function Write-ForeignListenerWarning {
     param([int]$Port)
-    $pids = @(Get-ListeningPids -Port $Port)
+    $pids = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
     if ($pids.Count -eq 0) { return $false }
     foreach ($processId in $pids) {
         $cmd = Get-ProcessCommandLine -ProcessId $processId
@@ -187,9 +213,10 @@ function Write-ForeignListenerWarning {
 
 function Stop-GarayeProcessTree {
     param(
-        [int]$ProcessId,
+        $ProcessId,
         [switch]$Force
     )
+    $ProcessId = ConvertTo-GarayePid $ProcessId
     if ($ProcessId -le 0) { return }
     if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
     if ($Force) {

@@ -12,8 +12,9 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_common.ps1")
 
 Initialize-GarayeFolders
+Grant-GarayeSystemAccess
 $python = Get-GarayePython
-$supervisor = Join-Path $PSScriptRoot "backend_supervisor.ps1"
+$supervisor = Join-Path $PSScriptRoot "run_supervisor.ps1"
 $powerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 if (-not (Test-Path -LiteralPath $powerShell)) {
     throw "Windows PowerShell 5.1 was not found at $powerShell"

@@ -24,8 +24,11 @@ $task = Get-ScheduledTaskSafe -TaskName $TaskName
 if ($task) {
     Write-Host "Starting scheduled task $TaskName ..."
     Start-ScheduledTask -TaskName $TaskName
+    Start-Sleep -Seconds 3
 }
-else {
+
+if (-not (Test-GarayeHealthOk -HealthUri $healthUri -TimeoutSec 3)) {
+    Write-Host "Scheduled task did not become healthy; starting supervisor in this Windows session."
     $supervisorPid = Get-RecordedPid -Path $script:SupervisorPidPath
     if ($supervisorPid -and (Get-Process -Id $supervisorPid -ErrorAction SilentlyContinue)) {
         Write-Host "Supervisor is already running with PID $supervisorPid. Waiting for health..."

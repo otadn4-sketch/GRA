@@ -167,7 +167,7 @@ try {
     }
 
     Write-GarayeLog "Supervisor starting pid=$PID root=$script:ProjectRoot python=$python listen=${HostAddress}:$Port health=$healthUri"
-
+    $child = $null
     $failures = 0
     $backoff = $CooldownSeconds
     $nextHealth = Get-Date
@@ -201,7 +201,7 @@ try {
             }
 
             if (-not $child -or $child.HasExited) {
-                $listeners = @(Get-ListeningPids -Port $Port)
+                $listeners = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
                 $foreign = $false
                 foreach ($listenerId in $listeners) {
                     if (Test-GarayeOurUvicorn -ProcessId $listenerId -Port $Port) {
@@ -234,7 +234,7 @@ try {
 
         if ($needStart) {
             Install-UpdatedRequirements
-            $listeners = @(Get-ListeningPids -Port $Port)
+            $listeners = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
             $blocked = $false
             foreach ($listenerId in $listeners) {
                 if (-not (Test-GarayeOurUvicorn -ProcessId $listenerId -Port $Port)) {
@@ -288,7 +288,7 @@ try {
         }
 
         $failures++
-        $listenPids = @(Get-ListeningPids -Port $Port)
+        $listenPids = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
         $listenText = if ($listenPids.Count -gt 0) { ($listenPids -join ",") } else { "none" }
         Write-GarayeLog -Level "WARN" -Message "Health check failed ($failures/$FailThreshold) uri=$healthUri pid=$($child.Id) listeningPids=$listenText"
 

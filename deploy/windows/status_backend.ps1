@@ -23,7 +23,7 @@ if ($supervisorPid) {
     $supervisorAlive = [bool](Get-Process -Id $supervisorPid -ErrorAction SilentlyContinue)
 }
 
-$listeners = @(Get-ListeningPids -Port $Port)
+$listeners = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
 $listenText = if ($listeners.Count -gt 0) { ($listeners -join ", ") } else { "(not LISTENING)" }
 $healthOk = Test-GarayeHealthOk -HealthUri $healthUri -TimeoutSec 10
 
