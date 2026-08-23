@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import html
 import json
 import logging
@@ -1441,6 +1442,17 @@ async def cleanup_legacy_channel_interactions() -> None:
 
 async def reconcile_message_keyboards() -> None:
     """دکمه‌های کانال و گروه مقصد را از روی آخرین داده SQLite بازسازی می‌کند."""
+    enabled = os.getenv("RECONCILE_MESSAGE_KEYBOARDS_ON_STARTUP", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if not enabled:
+        logger.warning(
+            "Skipping startup keyboard reconciliation so the HTTP listener can bind; "
+            "set RECONCILE_MESSAGE_KEYBOARDS_ON_STARTUP=1 to enable it."
+        )
+        return
     records = await db.list_review_messages_for_reconciliation()
     source_refreshed = 0
     destination_refreshed = 0

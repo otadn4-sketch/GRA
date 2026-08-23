@@ -270,6 +270,13 @@ Get-Content .\logs\uvicorn.err.log -Tail 80
 - اتصال برقرار نمی‌شود یعنی هنوز LISTENING نیست یا import/startup گیر کرده؛ `uvicorn.err.log` را بخوانید.
 - `200` با `{"status":"ok"...}` یعنی اپ سالم است و باید مهلت startup را زیاد کنید: `-StartupGraceSeconds 180`.
 
+اگر `uvicorn.err.log` پر از `Message keyboard refreshed ... BaleAPIError` است، startup روی هزاران دکمه بله گیر کرده و پورت ۸۰۰۰ اصلاً LISTENING نمی‌شود. روی سرور موقتاً این خط را در `app\main.py` غیرفعال کنید:
+
+```powershell
+(Get-Content .\app\main.py -Raw) -replace 'await reconcile_message_keyboards\(\)','logger.warning("skip keyboard reconcile on startup")' | Set-Content .\app\main.py -Encoding UTF8
+```
+
+
 ## ۸) تشخیص مشکل 502
 
 
