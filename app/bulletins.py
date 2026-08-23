@@ -705,7 +705,8 @@ class BulletinService:
         pending_existing = [
             row for row in existing_rows if int(row["id"]) not in claimed_ids
         ]
-        representatives, duplicate_of = choose_representatives(
+        representatives, duplicate_of = await asyncio.to_thread(
+            choose_representatives,
             [*fresh_rows, *pending_existing],
             threshold=self.settings.analysis_near_duplicate_threshold,
             existing=claimed_existing,
@@ -746,9 +747,11 @@ class BulletinService:
             async with limiter:
                 return await self._analyze_selected_message(message_id, actor=actor)
 
-        analyzed = list(
-            await asyncio.gather(*(analyze_bounded(message_id) for message_id in analyze_ids))
-        ) if analyze_ids else []
+        analyzed: list[dict[str, Any]] = []
+        for index in range(0, len(analyze_ids), 8):
+            chunk = analyze_ids[index:index + 8]
+            analyzed.extend(await asyncio.gather(*(analyze_bounded(message_id) for message_id in chunk)))
+            await asyncio.sleep(0)
         results = analyzed + skipped_results
         analyzed_ok = sum(1 for result in analyzed if result.get("ok"))
         failed = sum(1 for result in analyzed if not result.get("ok"))

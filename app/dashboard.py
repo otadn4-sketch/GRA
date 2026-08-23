@@ -2155,7 +2155,7 @@ def create_dashboard_router(
             request_reload()
             result["restarting"] = True
             result["message"] = (
-                "فایل‌ها جایگزین شدند. اگر سامانه با start-background یا وظیفه زمان‌بندی‌شده اجرا شده باشد، "
+                "فایل‌ها جایگزین شدند. اگر سامانه با ناظر Windows یا وظیفه زمان‌بندی‌شده اجرا شده باشد، "
                 "ظرف چند ثانیه با نسخه جدید برمی‌گردد."
             )
         else:

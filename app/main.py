@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import html
 import json
 import logging
-from logging.handlers import RotatingFileHandler
 import re
 from contextlib import asynccontextmanager
 from time import monotonic
@@ -16,8 +16,11 @@ from urllib.parse import quote_plus, urlparse
 import qrcode
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .bale import BaleAPIError, BaleClient
 from .bot_queue_recovery import BotQueueRecoveryService
@@ -28,23 +31,17 @@ from .scheduler import BulletinScheduler
 from .editorial_automation import EditorialAutomationService
 from . import __version__
 from .dashboard import create_dashboard_router
+from .health import router as health_router
+from .logging_setup import (
+    asyncio_exception_handler,
+    configure_logging,
+    observe_background_task,
+)
 from .security import MiniAppAuthError, validate_init_data
 
 settings: Settings = load_settings()
-logging.basicConfig(
-    level=getattr(logging, settings.log_level, logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+configure_logging(settings)
 logger = logging.getLogger("prasad")
-log_dir = settings.database_path.parent / "logs"
-log_dir.mkdir(parents=True, exist_ok=True)
-_file_handler = RotatingFileHandler(
-    log_dir / "prasad.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
-)
-_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-logging.getLogger().addHandler(_file_handler)
-# جلوگیری از ثبت URL کامل API و افشای توکن در لاگ‌های httpx
-logging.getLogger("httpx").setLevel(logging.WARNING)
 
 db = Database(settings.database_path)
 bale = BaleClient(settings.token)
@@ -1445,6 +1442,17 @@ async def cleanup_legacy_channel_interactions() -> None:
 
 async def reconcile_message_keyboards() -> None:
     """دکمه‌های کانال و گروه مقصد را از روی آخرین داده SQLite بازسازی می‌کند."""
+    enabled = os.getenv("RECONCILE_MESSAGE_KEYBOARDS_ON_STARTUP", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if not enabled:
+        logger.warning(
+            "Skipping startup keyboard reconciliation so the HTTP listener can bind; "
+            "set RECONCILE_MESSAGE_KEYBOARDS_ON_STARTUP=1 to enable it."
+        )
+        return
     records = await db.list_review_messages_for_reconciliation()
     source_refreshed = 0
     destination_refreshed = 0
@@ -1478,54 +1486,90 @@ async def reconcile_message_keyboards() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global polling_task
-    await db.init()
-    await db.ensure_bootstrap_admin(
-        username=settings.admin_username,
-        password=settings.admin_password,
-    )
-    logger.info("SQLite database ready: %s", settings.database_path)
-    default_target = await get_target_chat_id()
-    if settings.source_channel_username:
-        await db.register_monitored_username(
-            settings.source_channel_username,
-            title=settings.source_channel_username,
-            target_chat_id=default_target,
-            target_title=settings.target_chat_title,
+    logger.info("Application startup beginning version=%s", __version__)
+    started = False
+    try:
+        await db.init()
+        await db.ensure_bootstrap_admin(
+            username=settings.admin_username,
+            password=settings.admin_password,
         )
-    if settings.input_mode == "miniapp" and not settings.miniapp_base_url:
-        logger.warning("INPUT_MODE=miniapp است اما MINIAPP_BASE_URL تنظیم نشده؛ فرم‌های لینک و خطابه باز نخواهند شد.")
-    if settings.dashboard_enabled and not settings.admin_password:
-        logger.warning("Dashboard enabled but ADMIN_PASSWORD is empty; /admin will return 503")
-    if settings.bot_mode != "disabled":
-        await cleanup_legacy_channel_interactions()
-        await reconcile_message_keyboards()
-    await bulletin_scheduler.start()
-    await editorial_automation.start()
-    recovered_runs = await db.recover_incomplete_bulletin_runs()
-    for run_id in recovered_runs:
-        asyncio.create_task(
-            bulletin_service.execute_run(run_id),
-            name=f"recovered-bulletin-{run_id}",
-        )
-    if recovered_runs:
-        logger.info("Recovered %s queued bulletin run(s)", len(recovered_runs))
-    if settings.bot_mode == "polling":
-        polling_task = asyncio.create_task(polling_loop(), name="bale-polling")
-    await db.add_system_event("app", "INFO", "startup", f"Garaye Newsletter v{__version__} started")
-    yield
-    await editorial_automation.shutdown()
-    await bulletin_scheduler.shutdown()
-    if polling_task:
-        polling_task.cancel()
+        logger.info("SQLite database ready: %s", settings.database_path)
+        default_target = await get_target_chat_id()
+        if settings.source_channel_username:
+            await db.register_monitored_username(
+                settings.source_channel_username,
+                title=settings.source_channel_username,
+                target_chat_id=default_target,
+                target_title=settings.target_chat_title,
+            )
+        if settings.input_mode == "miniapp" and not settings.miniapp_base_url:
+            logger.warning("INPUT_MODE=miniapp است اما MINIAPP_BASE_URL تنظیم نشده؛ فرم‌های لینک و خطابه باز نخواهند شد.")
+        if settings.dashboard_enabled and not settings.admin_password:
+            logger.warning("Dashboard enabled but ADMIN_PASSWORD is empty; /admin will return 503")
+        asyncio.get_running_loop().set_exception_handler(asyncio_exception_handler)
+
+        async def complete_startup() -> None:
+            global polling_task
+            if settings.bot_mode != "disabled":
+                await cleanup_legacy_channel_interactions()
+                await reconcile_message_keyboards()
+            await bulletin_scheduler.start()
+            await editorial_automation.start()
+            recovered_runs = await db.recover_incomplete_bulletin_runs()
+            if recovered_runs:
+                logger.warning(
+                    "Not auto-resuming %s interrupted bulletin run(s): %s",
+                    len(recovered_runs),
+                    recovered_runs,
+                )
+                for run_id in recovered_runs:
+                    await db.fail_bulletin_run(
+                        run_id,
+                        "قطع شد (ری‌استارت سرویس). در صورت نیاز از داشبورد دوباره اجرا کنید.",
+                        stage="interrupted",
+                        error_type="InterruptedByRestart",
+                    )
+            if settings.bot_mode == "polling":
+                polling_task = observe_background_task(
+                    asyncio.create_task(polling_loop(), name="bale-polling")
+                )
+            logger.info("Background application startup complete version=%s", __version__)
+            await db.add_system_event("app", "INFO", "startup", f"Garaye Newsletter v{__version__} started")
+
+        observe_background_task(asyncio.create_task(complete_startup(), name="garaye-complete-startup"))
+        started = True
+        logger.info("HTTP listener ready version=%s; remaining startup continues in background", __version__)
+        yield
+    except Exception:
+        if not started:
+            logger.exception("Application startup failed")
+        raise
+    finally:
+        logger.info("Application shutdown starting version=%s", __version__)
         try:
-            await polling_task
-        except asyncio.CancelledError:
-            pass
-    await bulletin_service.close()
-    await bale.close()
+            await editorial_automation.shutdown()
+            await bulletin_scheduler.shutdown()
+            if polling_task:
+                polling_task.cancel()
+                try:
+                    await polling_task
+                except asyncio.CancelledError:
+                    pass
+            await bulletin_service.close()
+            await bale.close()
+            if started:
+                await db.add_system_event(
+                    "app", "INFO", "shutdown", f"Garaye Newsletter v{__version__} stopped"
+                )
+        except Exception:
+            logger.exception("Application shutdown failed")
+            raise
+        logger.info("Application shutdown complete version=%s", __version__)
 
 
 app = FastAPI(title="سامانه خبرنامه گرایه", version=__version__, lifespan=lifespan)
+app.include_router(health_router)
 app.include_router(
     create_dashboard_router(
         db,
@@ -1564,37 +1608,18 @@ async def miniapp_headers(request: Request, call_next):
     return response
 
 
-@app.get("/health")
-async def health() -> dict[str, Any]:
-    database = await db.health_summary()
-    sources = await db.list_monitored_chats(enabled_only=True)
-    ai_profiles = bulletin_service.ai_status().get("profiles", {})
-    return {
-        "ok": not database["missing_tables"] and database["quick_check"].lower() == "ok",
-        "mode": settings.bot_mode,
-        "input_mode": settings.input_mode,
-        "miniapp_ready": bool(settings.miniapp_base_url) if settings.input_mode == "miniapp" else None,
-        "target_chat_id": await get_target_chat_id(),
-        "replace_original_message": settings.replace_original_message,
-        "active_sources": len(sources),
-        "dashboard_enabled": settings.dashboard_enabled,
-        "ai_ready": bool(settings.ai_api_keys and settings.ai_model and settings.ai_provider != "disabled"),
-        "ai_provider": settings.ai_provider,
-        "ai_model": settings.ai_model or None,
-        "ai_key_count": len(settings.ai_api_keys),
-        "ai_profiles": ai_profiles,
-        "ai_max_concurrency": settings.ai_max_concurrency,
-        "scheduler_enabled": settings.scheduler_enabled,
-        "crawler": {
-            "enabled": settings.crawler_enabled,
-            "channels_file": str(settings.crawler_channels_path),
-            "firefox_profile_configured": bool(settings.crawler_firefox_profile),
-            "destination_configured": bool(settings.crawler_destination_chat_id),
-            "repeat_seconds": settings.crawler_repeat_seconds,
-        },
-        "database": database,
-        "version": __version__,
-    }
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, StarletteHTTPException):
+        return await http_exception_handler(request, exc)
+    if isinstance(exc, RequestValidationError):
+        return await request_validation_exception_handler(request, exc)
+    logger.exception(
+        "Unhandled exception method=%s path=%s",
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
 
 
 @app.post("/webhook/{secret}")

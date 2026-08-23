@@ -21,4 +21,4 @@ if result.get('python_restart_requested'):
     request_reload()
 "@
 if ($LASTEXITCODE -ne 0) { throw "Applying the update zip failed." }
-Write-Host "If the service is running under start-background.ps1 it will restart with the new files."
+Write-Host "If the service is running under deploy\windows\backend_supervisor.ps1 it will restart with the new files."

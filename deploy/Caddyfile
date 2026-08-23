@@ -1,5 +1,6 @@
 https://prasad.lmskalk.ir {
     encode zstd gzip
+    # Uvicorn must listen only on 127.0.0.1:8000. Caddy owns 80/443 and TLS.
     reverse_proxy 127.0.0.1:8000
 
     header {
