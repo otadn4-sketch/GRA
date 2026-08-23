@@ -201,9 +201,11 @@ try {
             }
 
             if (-not $child -or $child.HasExited) {
-                $listeners = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
+                $listeners = @(Get-GarayePortListenerIds -Port $Port)
                 $foreign = $false
                 foreach ($listenerId in $listeners) {
+                    $listenerId = ConvertTo-GarayePid $listenerId
+                    if ($listenerId -le 0) { continue }
                     if (Test-GarayeOurUvicorn -ProcessId $listenerId -Port $Port) {
                         if (Test-GarayeHealthOk -HealthUri $healthUri -TimeoutSec $HealthTimeoutSeconds) {
                             $adopted = Get-Process -Id $listenerId -ErrorAction SilentlyContinue
@@ -234,9 +236,11 @@ try {
 
         if ($needStart) {
             Install-UpdatedRequirements
-            $listeners = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
+            $listeners = @(Get-GarayePortListenerIds -Port $Port)
             $blocked = $false
             foreach ($listenerId in $listeners) {
+                $listenerId = ConvertTo-GarayePid $listenerId
+                if ($listenerId -le 0) { continue }
                 if (-not (Test-GarayeOurUvicorn -ProcessId $listenerId -Port $Port)) {
                     $cmd = Get-ProcessCommandLine -ProcessId $listenerId
                     Write-GarayeLog -Level "ERROR" -Message "Refusing to start because port $Port is held by pid=$listenerId command=$cmd"
@@ -288,7 +292,7 @@ try {
         }
 
         $failures++
-        $listenPids = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
+        $listenPids = @(Get-GarayePortListenerIds -Port $Port)
         $listenText = if ($listenPids.Count -gt 0) { ($listenPids -join ",") } else { "none" }
         Write-GarayeLog -Level "WARN" -Message "Health check failed ($failures/$FailThreshold) uri=$healthUri pid=$($child.Id) listeningPids=$listenText"
 

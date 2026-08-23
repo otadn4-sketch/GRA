@@ -23,7 +23,7 @@ if ($supervisorPid) {
     $supervisorAlive = [bool](Get-Process -Id $supervisorPid -ErrorAction SilentlyContinue)
 }
 
-$listeners = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
+$listeners = @(Get-GarayePortListenerIds -Port $Port)
 $listenText = if ($listeners.Count -gt 0) { ($listeners -join ", ") } else { "(not LISTENING)" }
 $healthOk = Test-GarayeHealthOk -HealthUri $healthUri -TimeoutSec 10
 
@@ -46,6 +46,8 @@ Write-Host "App log         : $(Join-Path $script:ProjectRoot 'data\logs\prasad.
 
 if ($listeners.Count -gt 0) {
     foreach ($listenerId in $listeners) {
+        $listenerId = ConvertTo-GarayePid $listenerId
+        if ($listenerId -le 0) { continue }
         Write-Host ("Listener {0}: {1}" -f $listenerId, (Get-ProcessCommandLine -ProcessId $listenerId))
     }
 }

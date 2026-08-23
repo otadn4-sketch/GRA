@@ -37,8 +37,10 @@ elseif ($uvicornPid) {
     Write-GarayeLog -Level "WARN" -Message "PID file $uvicornPid is not this project's uvicorn; not killing it."
 }
 
-$listeners = @(Get-ListeningPids -Port $Port)
+$listeners = @(Get-GarayePortListenerIds -Port $Port)
 foreach ($listenerId in $listeners) {
+    $listenerId = ConvertTo-GarayePid $listenerId
+    if ($listenerId -le 0) { continue }
     if (Test-GarayeOurUvicorn -ProcessId $listenerId -Port $Port) {
         Write-GarayeLog "Stopping leftover LISTENING uvicorn pid=$listenerId"
         Stop-GarayeProcessTree -ProcessId $listenerId -Force

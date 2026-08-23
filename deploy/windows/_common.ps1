@@ -105,22 +105,38 @@ function Get-RecordedPid {
 
 function ConvertTo-GarayePidArray {
     param($Value)
-    $out = New-Object System.Collections.Generic.List[int]
-    $queue = New-Object System.Collections.Queue
-    [void]$queue.Enqueue($Value)
-    while ($queue.Count -gt 0) {
-        $cur = $queue.Dequeue()
+    # Walk nested arrays/lists WITHOUT @() wrapping. In Windows PowerShell 5.1,
+    # @($genericList) and `return ,$int32Array` both turn a PID list into one
+    # foreach item of type System.Int32[], which cannot bind to [int]$ProcessId.
+    if ($null -eq $Value) { return }
+    $walk = New-Object System.Collections.ArrayList
+    [void]$walk.Add($Value)
+    $index = 0
+    $seen = @{}
+    while ($index -lt $walk.Count -and $index -lt 256) {
+        $cur = $walk[$index]
+        $index++
         if ($null -eq $cur -or $cur -eq "") { continue }
-        if ($cur -is [System.Array] -or ($cur -is [System.Collections.IEnumerable] -and -not ($cur -is [string]))) {
-            foreach ($item in @($cur)) { [void]$queue.Enqueue($item) }
+        if ($cur -is [string] -or $cur -is [ValueType]) {
+            $n = 0
+            if ([int]::TryParse("$cur", [ref]$n) -and $n -gt 0 -and -not $seen.ContainsKey($n)) {
+                $seen[$n] = $true
+                Write-Output $n
+            }
+            continue
+        }
+        if ($cur -is [System.Array] -or $cur -is [System.Collections.IList]) {
+            foreach ($item in $cur) {
+                [void]$walk.Add($item)
+            }
             continue
         }
         $n = 0
-        if ([int]::TryParse("$cur", [ref]$n) -and $n -gt 0 -and -not $out.Contains($n)) {
-            [void]$out.Add($n)
+        if ([int]::TryParse("$cur", [ref]$n) -and $n -gt 0 -and -not $seen.ContainsKey($n)) {
+            $seen[$n] = $true
+            Write-Output $n
         }
     }
-    return $out
 }
 
 function ConvertTo-GarayePid {
@@ -167,17 +183,25 @@ function Test-GarayeOurUvicorn {
 
 function Get-ListeningPids {
     param([int]$Port)
-    $ids = New-Object System.Collections.Generic.List[int]
+    # Emit each PID on the pipeline. Never `return ,$ids.ToArray()` — that makes
+    # foreach treat the whole Int32[] as a single ProcessId.
+    $seen = @{}
     $pattern = ":$Port\s"
     foreach ($line in @(netstat -ano -p tcp)) {
         if ($line -notmatch $pattern) { continue }
         if ($line -notmatch "LISTENING\s+(\d+)\s*$") { continue }
         $owning = 0
-        if ([int]::TryParse($Matches[1], [ref]$owning) -and $owning -gt 0 -and -not $ids.Contains($owning)) {
-            [void]$ids.Add($owning)
+        if ([int]::TryParse($Matches[1], [ref]$owning) -and $owning -gt 0 -and -not $seen.ContainsKey($owning)) {
+            $seen[$owning] = $true
+            Write-Output $owning
         }
     }
-    return $ids
+}
+
+function Get-GarayePortListenerIds {
+    param([int]$Port)
+    # Always usable as: foreach ($id in @(Get-GarayePortListenerIds -Port $Port))
+    ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
 }
 
 function Grant-GarayeSystemAccess {
@@ -202,9 +226,11 @@ function Get-ProcessCommandLine {
 
 function Write-ForeignListenerWarning {
     param([int]$Port)
-    $pids = ConvertTo-GarayePidArray (Get-ListeningPids -Port $Port)
+    $pids = @(Get-GarayePortListenerIds -Port $Port)
     if ($pids.Count -eq 0) { return $false }
     foreach ($processId in $pids) {
+        $processId = ConvertTo-GarayePid $processId
+        if ($processId -le 0) { continue }
         $cmd = Get-ProcessCommandLine -ProcessId $processId
         Write-GarayeLog -Level "ERROR" -Message "Port $Port is already LISTENING pid=$processId command=$cmd"
     }

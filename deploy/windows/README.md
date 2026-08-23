@@ -216,7 +216,49 @@ reverse_proxy 127.0.0.1:8000
 caddy reload --config C:\path\to\Caddyfile
 ```
 
-## ۷) تشخیص مشکل 502
+## ۷) خطای `System.Int32[]` هنگام شروع ناظر
+
+اگر ناظر بلافاصله با این پیام می‌میرد:
+
+```text
+Cannot convert the "System.Int32[]" value of type "System.Int32[]" to type "System.Int32".
+Test-GarayeOurUvicorn : ... parameter 'ProcessId'
+```
+
+یعنی روی سرور هنوز اسکریپت قدیمی است (`return ,$ids.ToArray()`). uvicorn اصلاً start نمی‌شود و پورت ۸۰۰۰ LISTENING نمی‌شود.
+
+فایل‌های `deploy\windows` را به‌روز کنید، **یا** همین هات‌فیکس را از ریشه پروژه اجرا کنید:
+
+```powershell
+cd C:\Users\Administrator\Desktop\PRASADbot\gerayeh_VQ
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\windows\apply_pid_hotfix.ps1
+```
+
+اگر `apply_pid_hotfix.ps1` روی دیسک نیست، سه فایل `_common.ps1`، `backend_supervisor.ps1` و `status_backend.ps1` را از شاخه `cursor/windows-production-supervisor-9246` کپی کنید.
+
+بعد دوباره:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\windows\backend_supervisor.ps1 -HostAddress 127.0.0.1 -Port 8000
+```
+
+خروجی سالم باید شامل `Started uvicorn` باشد، نه `Supervisor error`. در پنجره دیگر:
+
+```powershell
+curl.exe http://127.0.0.1:8000/health
+netstat -ano | findstr :8000
+```
+
+باید `127.0.0.1:8000` در حالت `LISTENING` باشد. اگر هنوز همان `Int32[]` را دیدید، فایل‌ها جایگزین نشده‌اند.
+
+سپس Scheduled Task را (با PowerShell Administrator) دوباره نصب کنید تا SYSTEM همان اسکریپت ثابت را اجرا کند:
+
+```powershell
+.\deploy\windows\install_backend_task.ps1
+```
+
+## ۸) تشخیص مشکل 502
+
 
 `502` از Caddy یعنی به `127.0.0.1:8000` وصل نشده است.
 
@@ -249,7 +291,7 @@ Select-String -Path .\logs\backend-supervisor.log -Pattern 'restart|health faile
 
 6. اگر پورت را پروسس دیگری گرفته، ناظر آن را Kill نمی‌کند؛ PID و CommandLine را در لاگ می‌نویسد.
 
-## ۸) تست Auto-Recovery ناظر
+## ۹) تست Auto-Recovery ناظر
 
 ### الف) مرگ پروسس uvicorn
 
@@ -311,7 +353,7 @@ Resume-Process -Id <PID>
 
 سپس در صورت نیاز `.\deploy\windows\restart_backend.ps1`
 
-## ۹) Firewall
+## ۱۰) Firewall
 
 با bind شدن به `127.0.0.1` دسترسی عمومی به پورت `8000` از بین می‌رود. هیچ Rule فایروال به‌صورت خودکار ساخته یا حذف نمی‌شود.
 
@@ -338,7 +380,7 @@ Remove-NetFirewallRule -DisplayName 'EXACT RULE NAME HERE'
 
 Rule ناشناخته را حذف نکنید.
 
-## ۱۰) Rollback
+## ۱۱) Rollback
 
 برای برگشت به اجرای دستی قبلی (موقت):
 
@@ -357,7 +399,7 @@ Rule ناشناخته را حذف نکنید.
 
 برای برگرداندن فایل‌های برنامه به نسخه git قبلی، از همان checkout/backup خودتان استفاده کنید. `.env` را از روی نسخه دیگر کپی نکنید مگر خودتان بخواهید.
 
-## ۱۱) Uninstall
+## ۱۲) Uninstall
 
 ```powershell
 cd C:\Users\Administrator\Desktop\PRASADbot\gerayeh_VQ
@@ -368,7 +410,7 @@ Scheduled Task حذف می‌شود و Backend متوقف می‌گردد. دا�
 
 معادل قدیمی: `.\deploy\unregister-task.ps1`
 
-## ۱۲) جلوگیری از چند نسخه همزمان
+## ۱۳) جلوگیری از چند نسخه همزمان
 
 - Mutex سراسری روی همین مسیر پروژه
 - فایل‌های `run\garaye.pid` و `run\garaye-supervisor.pid`
@@ -377,6 +419,6 @@ Scheduled Task حذف می‌شود و Backend متوقف می‌گردد. دا�
 
 دو checkout جداگانه mutex جدا دارند. دو ناظر روی **همین** پوشه هم‌زمان اجرا نمی‌شوند.
 
-## ۱۳) به‌روزرسانی زنده
+## ۱۴) به‌روزرسانی زنده
 
 ناظر پرچم‌های `run\reload.request` و `run\pip.request` را مثل قبل رعایت می‌کند. جزئیات: `docs\LIVE_UPDATE.md`
