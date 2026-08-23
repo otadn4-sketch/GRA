@@ -1,4 +1,4 @@
-# به‌روزرسانی زنده سامانه گرایه (نسخه ۱۲.۳.۰)
+# به‌روزرسانی زنده سامانه گرایه (نسخه ۱۲.۳.۱)
 
 از این نسخه لازم نیست برای اعمال فایل‌های جدید، هر بار سامانه را دستی متوقف کنید. بسته ZIP را از داخل داشبورد آپلود می‌کنید؛ فایل‌های برنامه جایگزین می‌شوند و اگر سرویس با حالت نظارت‌شده اجرا شده باشد، خودش با نسخه جدید برمی‌گردد.
 
@@ -6,33 +6,37 @@
 
 ## یک‌بار برای همیشه: اجرای نظارت‌شده
 
-آپلود ZIP فقط وقتی به‌صورت خودکار سرویس را برمی‌گرداند که فرآیند uvicorn زیر ناظر `deploy\start-background.ps1` باشد.
+آپلود ZIP فقط وقتی به‌صورت خودکار سرویس را برمی‌گرداند که uvicorn زیر ناظر production باشد:
+
+`deploy\windows\backend_supervisor.ps1`
+
+(اسکریپت قدیمی `deploy\start-background.ps1` همین ناظر را صدا می‌زند.)
+
+راهنمای کامل Windows Server: `deploy\windows\README.md`
 
 ### نصب تازه
 
-پس از `deploy\install.ps1` و `deploy\initialize.ps1`:
+پس از `deploy\install.ps1` و `deploy\initialize.ps1`، از PowerShell با دسترسی Administrator:
 
 ```powershell
-deploy\start-background.ps1
+deploy\windows\install_backend_task.ps1
 ```
 
-این اسکریپت سرویس را بالا می‌آورد و یک ناظر پنهان نگه می‌دارد تا بعد از آپدیت زنده، uvicorn دوباره شروع شود.
-
-برای اجرای دائمی بعد از روشن‌شدن ویندوز (با دسترسی Administrator):
+یا بدون Scheduled Task:
 
 ```powershell
-deploy\register-task.ps1
+deploy\windows\start_backend.ps1
 ```
 
-وظیفه زمان‌بندی‌شده از همین نسخه با `-Supervised` ثبت می‌شود. اگر قبلاً `register-task.ps1` را اجرا کرده‌اید، **یک‌بار دیگر** آن را اجرا کنید تا مسیر شروع از `start.ps1` به `start-background.ps1` عوض شود.
+اگر قبلاً `deploy\register-task.ps1` را با `0.0.0.0` ثبت کرده‌اید، **یک‌بار دیگر** آن را اجرا کنید تا bind به `127.0.0.1` و ناظر جدید اعمال شود.
 
-### اگر همین حالا سرویس با `start.ps1` بالا است
+### اگر همین حالا سرویس با uvicorn دستی بالا است
 
-1. `deploy\stop.ps1`
-2. `deploy\start-background.ps1`
-3. در صورت استفاده از Scheduled Task: `deploy\register-task.ps1` را دوباره اجرا کنید.
+1. پروسس‌های uvicorn همین پروژه را متوقف کنید (نه هر `python.exe`).
+2. `deploy\windows\install_backend_task.ps1`
+3. `deploy\windows\status_backend.ps1`
 
-`deploy\start.ps1` برای اشکال‌زدایی در پنجره باز مناسب است، ولی پس از آپدیت زنده خودش برنمی‌گردد.
+`deploy\start.ps1` فقط برای اشکال‌زدایی در پنجره باز است و بعد از آپدیت زنده خودش برنمی‌گردد.
 
 ## ساخت بسته ZIP نسخه جدید
 
@@ -52,7 +56,7 @@ deploy\register-task.ps1
 نمونه در ویندوز، از ریشه پروژه:
 
 ```powershell
-Compress-Archive -Path app,web,deploy,VERSION,requirements.txt -DestinationPath garaye-12.3.0.zip
+Compress-Archive -Path app,web,deploy,VERSION,requirements.txt -DestinationPath garaye-12.3.1.zip
 ```
 
 حداکثر حجم بسته ۸۰ مگابایت است. `.env`، `.venv`، `data`، `backups` و فایل‌های `.db` داخل ZIP نادیده گرفته می‌شوند.
@@ -73,15 +77,17 @@ Compress-Archive -Path app,web,deploy,VERSION,requirements.txt -DestinationPath 
 اگر به داشبورد دسترسی ندارید ولی سرویس نظارت‌شده در حال اجرا است:
 
 ```powershell
-deploy\apply-update.ps1 -ZipPath C:\path\garaye-12.3.0.zip
+deploy\apply-update.ps1 -ZipPath C:\path\garaye-12.3.1.zip
 ```
 
 ## اگر بعد از آپلود سامانه بالا نیامد
 
-1. لاگ‌ها: `data\logs\service.err.log` و `data\logs\service.out.log`
-2. سلامت: `deploy\healthcheck.ps1`
-3. اگر ناظر در حال اجرا نیست: `deploy\start-background.ps1`
-4. توقف کامل: `deploy\stop.ps1`
+1. لاگ ناظر: `logs\backend-supervisor.log`
+2. لاگ uvicorn: `logs\uvicorn.err.log` و `logs\uvicorn.out.log`
+3. لاگ برنامه: `data\logs\prasad.log`
+4. سلامت: `deploy\healthcheck.ps1` یا `deploy\windows\status_backend.ps1`
+5. اگر ناظر در حال اجرا نیست: `deploy\windows\start_backend.ps1`
+6. توقف backend (بدون کرالر): `deploy\windows\stop_backend.ps1`
 
 پرچم‌های داخلی (دست نزنید مگر برای عیب‌یابی):
 

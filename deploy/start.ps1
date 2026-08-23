@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$HostAddress = "0.0.0.0",
+    [string]$HostAddress = "127.0.0.1",
     [int]$Port = 8000
 )
 
@@ -12,4 +12,5 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 Set-Location -LiteralPath $projectRoot
 $env:PYTHONIOENCODING = "utf-8"
-& $python -m uvicorn app.main:app --host $HostAddress --port $Port --proxy-headers
+Write-Host "Foreground debug start. Production should use deploy\windows\start_backend.ps1 (127.0.0.1)."
+& $python -m uvicorn app.main:app --host $HostAddress --port $Port --proxy-headers --forwarded-allow-ips 127.0.0.1

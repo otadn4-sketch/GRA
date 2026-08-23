@@ -5,6 +5,7 @@ __pycache__/
 data/
 backups/
 run/
+logs/
 .env
 *.db
 *.db-wal
