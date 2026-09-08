@@ -213,7 +213,7 @@ class Settings:
     high_attention_ai_api_key: str = field(default="", repr=False)
     # Public address used for editorial short links.  A fixed production default
     # keeps this feature usable without changing an existing .env file.
-    public_base_url: str = "https://prasad.lmskalk.ir"
+    public_base_url: str = "https://irangerayeh.ir"
 
     # HTML is the canonical page-layout source.  Word remains a secondary,
     # editable export generated from the same BulletinData object.
@@ -463,7 +463,7 @@ def load_settings() -> Settings:
         ),
         analysis_person_api_keys=ai_api_keys,
         high_attention_ai_api_key=high_attention_ai_api_key,
-        public_base_url=os.getenv("PUBLIC_BASE_URL", "https://prasad.lmskalk.ir").strip().rstrip("/"),
+        public_base_url=os.getenv("PUBLIC_BASE_URL", "https://irangerayeh.ir").strip().rstrip("/"),
         layout_engine="html",
         layout_browser_path=os.getenv(
             "LAYOUT_BROWSER_PATH",
